@@ -35,6 +35,7 @@
 #include "../../../packages/common/shared_movement.h"
 #include "../../../packages/common/net_sim.h"
 #include "../../../packages/simulation/local_game.h"
+#include "../../../packages/render/proc_tex.h"
 
 #define STATE_LOBBY 0
 #define STATE_GAME_NET 1
@@ -62,6 +63,24 @@ unsigned int travel_overlay_until_ms = 0;
 float cam_yaw = 0.0f;
 float cam_pitch = 0.0f;
 float current_fov = 75.0f;
+
+typedef struct VehicleStyle {
+    float matte;
+    float spec;
+    float neon;
+    float hazard;
+    float glitch;
+    float underglow_alpha;
+    float neon_scroll;
+    uint32_t seed;
+} VehicleStyle;
+
+static VehicleStyle g_vehicle_style = {0.85f, 0.15f, 0.25f, 0.45f, 0.2f, 0.18f, 0.01f, 0xC0FFEE11u};
+static int vehicle_style_enabled = 1;
+static int vehicle_underglow_enabled = 1;
+static int vehicle_worklights_enabled = 1;
+static ProcTexture g_vehicle_noise_tex = {0};
+static ProcTexture g_vehicle_glitch_tex = {0};
 
 #define Z_FAR 8000.0f
 
@@ -644,56 +663,192 @@ void draw_map() {
     }
 }
 
-void draw_buggy_model() {
-    // Chassis - Cyber Grey
-    glColor3f(0.2f, 0.2f, 0.2f);
-    glPushMatrix(); glScalef(2.0f, 1.0f, 3.5f); 
-    glBegin(GL_QUADS); 
-    glVertex3f(-1,1,1); glVertex3f(1,1,1); glVertex3f(1,1,-1); glVertex3f(-1,1,-1); 
-    glVertex3f(-1,-1,1); glVertex3f(1,-1,1); glVertex3f(1,1,1); glVertex3f(-1,1,1); 
-    glVertex3f(-1,-1,-1);
-    glVertex3f(-1,1,-1); glVertex3f(1,1,-1); glVertex3f(1,-1,-1); 
-    glVertex3f(1,-1,-1); glVertex3f(1,1,-1); glVertex3f(1,1,1); glVertex3f(1,-1,1); 
-    glVertex3f(-1,-1,1); glVertex3f(-1,1,1); glVertex3f(-1,1,-1); glVertex3f(-1,-1,-1); 
-    glEnd(); 
-    
-    // Neon Trim for Buggy
-    glLineWidth(2.0f); glColor3f(1.0f, 0.0f, 0.0f); // Red Trim
-    glBegin(GL_LINES);
-    glVertex3f(-1,1,1); glVertex3f(1,1,1);
-    glVertex3f(1,1,1); glVertex3f(1,1,-1);
-    glVertex3f(1,1,-1); glVertex3f(-1,1,-1);
-    glVertex3f(-1,1,-1); glVertex3f(-1,1,1);
+static void draw_box_solid(float hx, float hy, float hz) {
+    glBegin(GL_QUADS);
+    glNormal3f(0, 1, 0);
+    glVertex3f(-hx, hy, hz); glVertex3f(hx, hy, hz); glVertex3f(hx, hy, -hz); glVertex3f(-hx, hy, -hz);
+    glNormal3f(0, -1, 0);
+    glVertex3f(-hx, -hy, hz); glVertex3f(hx, -hy, hz); glVertex3f(hx, -hy, -hz); glVertex3f(-hx, -hy, -hz);
+    glNormal3f(0, 0, 1);
+    glVertex3f(-hx, -hy, hz); glVertex3f(hx, -hy, hz); glVertex3f(hx, hy, hz); glVertex3f(-hx, hy, hz);
+    glNormal3f(0, 0, -1);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(hx, -hy, -hz); glVertex3f(hx, hy, -hz); glVertex3f(-hx, hy, -hz);
+    glNormal3f(-1, 0, 0);
+    glVertex3f(-hx, -hy, -hz); glVertex3f(-hx, -hy, hz); glVertex3f(-hx, hy, hz); glVertex3f(-hx, hy, -hz);
+    glNormal3f(1, 0, 0);
+    glVertex3f(hx, -hy, hz); glVertex3f(hx, -hy, -hz); glVertex3f(hx, hy, -hz); glVertex3f(hx, hy, hz);
     glEnd();
-    
-    glPopMatrix();
-    
-    // Wheels - Neon Blue Rims
-    glColor3f(0.1f, 0.1f, 0.1f);
-    float wx[] = {-2.2, 2.2, -2.2, 2.2};
-    float wz[] = {2.5, 2.5, -2.5, -2.5};
-    for(int i=0; i<4; i++) {
+}
+
+static void draw_box_planar_uv(float hx, float hy, float hz, float scroll) {
+    glBegin(GL_QUADS);
+    float x, y, z;
+    glNormal3f(0, 1, 0);
+    x=-hx; y=hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=-hx; y=hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+
+    glNormal3f(0, 0, 1);
+    x=-hx; y=-hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=-hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=-hx; y=hy; z=hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+
+    glNormal3f(0, 0, -1);
+    x=-hx; y=-hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=-hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=hx; y=hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    x=-hx; y=hy; z=-hz; glTexCoord2f(x * 0.35f + scroll, z * 0.35f); glVertex3f(x, y, z);
+    glEnd();
+}
+
+void draw_buggy_model(PlayerState *p) {
+    uint32_t pid_seed = g_vehicle_style.seed ^ (uint32_t)(p ? (p->id + 1) * 2654435761u : 0u);
+    const float t_sec = SDL_GetTicks() * 0.001f;
+    const float scroll = t_sec * g_vehicle_style.neon_scroll + (float)(pid_seed & 255u) * 0.0007f;
+    GLfloat specular[] = {g_vehicle_style.spec * 0.35f, g_vehicle_style.spec * 0.35f, g_vehicle_style.spec * 0.35f, 1.0f};
+    GLfloat ambient[] = {0.06f, 0.06f, 0.07f, 1.0f};
+    GLfloat diffuse[] = {0.14f, 0.14f, 0.15f, 1.0f};
+    GLfloat light_pos[] = {0.4f, 2.5f, 1.8f, 0.0f};
+
+    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_TEXTURE_BIT | GL_COLOR_BUFFER_BIT | GL_LINE_BIT);
+
+    if (!vehicle_style_enabled) {
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.17f, 0.17f, 0.17f);
         glPushMatrix();
-        glTranslatef(wx[i], -0.5f, wz[i]); glScalef(0.8f, 1.5f, 1.5f);
-        glBegin(GL_QUADS); 
-        glColor3f(0.1f, 0.1f, 0.1f); // Tire
-        glVertex3f(-0.5,0.5,0.5); glVertex3f(0.5,0.5,0.5); glVertex3f(0.5,0.5,-0.5); glVertex3f(-0.5,0.5,-0.5);
-        glVertex3f(-0.5,-0.5,0.5); glVertex3f(0.5,-0.5,0.5); glVertex3f(0.5,0.5,-0.5); glVertex3f(-0.5,0.5,-0.5);
-        glVertex3f(-0.5,-0.5,-0.5); glVertex3f(-0.5,0.5,-0.5); glVertex3f(0.5,0.5,-0.5); glVertex3f(0.5,-0.5,-0.5);
-        glVertex3f(0.5,-0.5,-0.5);
-        glVertex3f(0.5,0.5,-0.5); glVertex3f(0.5,0.5,0.5); glVertex3f(0.5,-0.5,0.5);
-        glVertex3f(-0.5,-0.5,0.5); glVertex3f(-0.5,0.5,0.5); glVertex3f(-0.5,0.5,-0.5); glVertex3f(-0.5,-0.5,-0.5);
-        glVertex3f(0.5,0.5,0.5); glVertex3f(0.5,-0.5,0.5); glVertex3f(-0.5,-0.5,0.5); glVertex3f(-0.5,0.5,0.5);
-        glEnd(); 
-        
-        // Rim Line
-        glLineWidth(2.0f); glColor3f(0.0f, 1.0f, 1.0f); 
-        glBegin(GL_LINE_LOOP);
-        glVertex3f(-0.51, 0.5, 0.5); glVertex3f(-0.51, -0.5, 0.5); glVertex3f(-0.51, -0.5, -0.5); glVertex3f(-0.51, 0.5, -0.5);
+        glScalef(2.0f, 1.0f, 3.5f);
+        draw_box_solid(1.0f, 1.0f, 1.0f);
+        glPopMatrix();
+        glPopAttrib();
+        return;
+    }
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 6.0f + (1.0f - g_vehicle_style.matte) * 28.0f);
+
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.06f, 0.06f, 0.065f, 1.0f);
+    glPushMatrix();
+    glScalef(2.0f, 1.0f, 3.5f);
+    draw_box_solid(1.0f, 1.0f, 1.0f);
+    glPopMatrix();
+
+    glDisable(GL_LIGHTING);
+    glLineWidth(1.4f);
+    glColor4f(0.23f, 0.23f, 0.25f, 0.9f);
+    glPushMatrix();
+    glScalef(2.02f, 1.02f, 3.52f);
+    glBegin(GL_LINES);
+    glVertex3f(-1, 1, 1); glVertex3f(1, 1, 1);
+    glVertex3f(1, 1, 1); glVertex3f(1, 1, -1);
+    glVertex3f(-1, 1, -1); glVertex3f(1, 1, -1);
+    glVertex3f(-1, 1, 1); glVertex3f(-1, 1, -1);
+    glVertex3f(-1, 0, 1); glVertex3f(1, 0, 1);
+    glVertex3f(-1, 0, -1); glVertex3f(1, 0, -1);
+    glEnd();
+    glPopMatrix();
+
+    glColor4f(0.9f, 0.37f, 0.08f, 0.95f);
+    glPushMatrix();
+    glTranslatef(0.0f, 0.45f, 2.4f);
+    glScalef(1.6f, 0.12f, 0.3f);
+    draw_box_solid(1.0f, 1.0f, 1.0f);
+    glPopMatrix();
+
+    glPushMatrix();
+    glTranslatef(-1.6f, 0.0f, -0.3f);
+    glScalef(0.18f, 0.85f, 2.2f);
+    draw_box_solid(1.0f, 1.0f, 1.0f);
+    glPopMatrix();
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, g_vehicle_noise_tex.tex_id);
+    glColor4f(0.92f, 0.92f, 0.92f, 0.08f);
+    glPushMatrix();
+    glScalef(2.0f, 1.0f, 3.5f);
+    draw_box_planar_uv(1.0f, 1.0f, 1.0f, scroll);
+    glPopMatrix();
+
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBindTexture(GL_TEXTURE_2D, g_vehicle_glitch_tex.tex_id);
+    glColor4f(0.95f, 0.15f, 0.85f, g_vehicle_style.glitch * 0.45f);
+    glPushMatrix();
+    glTranslatef(1.85f, 0.2f, 0.4f);
+    glRotatef(90.0f, 0, 1, 0);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 0); glVertex3f(-0.6f, -0.45f, 0.0f);
+    glTexCoord2f(1, 0); glVertex3f(0.7f, -0.45f, 0.0f);
+    glTexCoord2f(1, 1); glVertex3f(0.7f, 0.4f, 0.0f);
+    glTexCoord2f(0, 1); glVertex3f(-0.6f, 0.4f, 0.0f);
+    glEnd();
+    glPopMatrix();
+
+    glPushMatrix();
+    glTranslatef(-1.85f, 0.05f, -0.7f);
+    glRotatef(-90.0f, 0, 1, 0);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 0); glVertex3f(-0.5f, -0.40f, 0.0f);
+    glTexCoord2f(1, 0); glVertex3f(0.6f, -0.40f, 0.0f);
+    glTexCoord2f(1, 1); glVertex3f(0.6f, 0.30f, 0.0f);
+    glTexCoord2f(0, 1); glVertex3f(-0.5f, 0.30f, 0.0f);
+    glEnd();
+    glPopMatrix();
+
+    if (vehicle_worklights_enabled) {
+        glDisable(GL_TEXTURE_2D);
+        glColor4f(1.0f, 0.97f, 0.88f, 0.85f);
+        glPushMatrix();
+        glTranslatef(0.0f, 1.2f, 1.75f);
+        glBegin(GL_QUADS);
+        glVertex3f(-0.7f, -0.08f, 0.0f); glVertex3f(0.7f, -0.08f, 0.0f); glVertex3f(0.7f, 0.08f, 0.0f); glVertex3f(-0.7f, 0.08f, 0.0f);
         glEnd();
-        
+        glColor4f(1.0f, 0.95f, 0.85f, 0.18f);
+        glBegin(GL_QUADS);
+        glVertex3f(-1.0f, -0.22f, 0.01f); glVertex3f(1.0f, -0.22f, 0.01f); glVertex3f(1.0f, 0.22f, 0.01f); glVertex3f(-1.0f, 0.22f, 0.01f);
+        glEnd();
         glPopMatrix();
     }
+
+    if (vehicle_underglow_enabled) {
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_LIGHTING);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        glPushMatrix();
+        glTranslatef(0.0f, -1.05f, 0.0f);
+        glBegin(GL_QUADS);
+        glColor4f(0.0f, 0.9f, 0.95f, g_vehicle_style.underglow_alpha * (0.8f + 0.2f * g_vehicle_style.neon));
+        glVertex3f(-2.7f, 0.0f, 3.4f); glVertex3f(2.7f, 0.0f, 3.4f); glVertex3f(2.7f, 0.0f, -3.4f); glVertex3f(-2.7f, 0.0f, -3.4f);
+        glColor4f(0.8f, 0.1f, 0.85f, g_vehicle_style.underglow_alpha * 0.35f);
+        glVertex3f(-2.0f, 0.01f, 2.8f); glVertex3f(2.0f, 0.01f, 2.8f); glVertex3f(2.0f, 0.01f, -2.8f); glVertex3f(-2.0f, 0.01f, -2.8f);
+        glEnd();
+        glPopMatrix();
+    }
+
+    float wx[] = {-2.2f, 2.2f, -2.2f, 2.2f};
+    float wz[] = {2.5f, 2.5f, -2.5f, -2.5f};
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+    glEnable(GL_LIGHTING);
+    for (int i = 0; i < 4; i++) {
+        glPushMatrix();
+        glTranslatef(wx[i], -0.5f, wz[i]);
+        glScalef(0.8f, 1.5f, 1.5f);
+        glColor3f(0.10f, 0.10f, 0.10f);
+        draw_box_solid(0.5f, 0.5f, 0.5f);
+        glPopMatrix();
+    }
+
+    glPopAttrib();
 }
 
 void draw_gun_model(int weapon_id) {
@@ -857,7 +1012,7 @@ void draw_player_3rd(PlayerState *p) {
     // Simulation yaw assumes forward is -Z, but this model is authored facing +Z.
     glRotatef(180.0f - draw_yaw, 0, 1, 0);
     if (p->in_vehicle) {
-        draw_buggy_model();
+        draw_buggy_model(p);
     } else {
         draw_ronin_shell();
         glPushMatrix();
@@ -916,6 +1071,13 @@ void draw_hud(PlayerState *p) {
     if (p->in_vehicle) {
         glColor3f(0.0f, 1.0f, 0.0f);
         draw_string("BUGGY ONLINE", 50, 120, 12);
+        char style_buf[96];
+        snprintf(style_buf, sizeof(style_buf), "F6 STYLE:%s F7 GLOW:%s F8 LIGHT:%s",
+                 vehicle_style_enabled ? "ON" : "OFF",
+                 vehicle_underglow_enabled ? "ON" : "OFF",
+                 vehicle_worklights_enabled ? "ON" : "OFF");
+        glColor3f(0.95f, 0.55f, 0.1f);
+        draw_string(style_buf, 50, 108, 6);
     }
 
     if (p->storm_charges > 0) {
@@ -1716,6 +1878,13 @@ int main(int argc, char* argv[]) {
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Window *win = SDL_CreateWindow("SHANKPIT [BUILD 181 - CTF RELOADED]", 100, 100, 1280, 720, SDL_WINDOW_OPENGL);
     SDL_GL_CreateContext(win);
+    proctex_init();
+    proc_tex_create(&g_vehicle_noise_tex, 64, 64);
+    proctex_make_noise_rgba(&g_vehicle_noise_tex, 64, 64, g_vehicle_style.seed);
+    proctex_upload_to_gl(&g_vehicle_noise_tex);
+    proc_tex_create(&g_vehicle_glitch_tex, 64, 64);
+    proctex_make_glitch_marks_rgba(&g_vehicle_glitch_tex, 64, 64, g_vehicle_style.seed ^ 0xA53u);
+    proctex_upload_to_gl(&g_vehicle_glitch_tex);
     net_init();
     
     local_init_match(1, 0);
@@ -1838,11 +2007,19 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else {
-                if(e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
-                    if (app_state == STATE_GAME_NET) net_shutdown();
-                    app_state = STATE_LOBBY;
-                    SDL_SetRelativeMouseMode(SDL_FALSE);
-                    setup_lobby_2d();
+                if (e.type == SDL_KEYDOWN) {
+                    if (e.key.keysym.sym == SDLK_ESCAPE) {
+                        if (app_state == STATE_GAME_NET) net_shutdown();
+                        app_state = STATE_LOBBY;
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        setup_lobby_2d();
+                    } else if (e.key.keysym.sym == SDLK_F6) {
+                        vehicle_style_enabled = !vehicle_style_enabled;
+                    } else if (e.key.keysym.sym == SDLK_F7) {
+                        vehicle_underglow_enabled = !vehicle_underglow_enabled;
+                    } else if (e.key.keysym.sym == SDLK_F8) {
+                        vehicle_worklights_enabled = !vehicle_worklights_enabled;
+                    }
                 }
                 if(e.type == SDL_MOUSEMOTION) {
                     if (app_state == STATE_GAME_NET && net_spawn_protect_cmds > 0) continue;
@@ -1982,6 +2159,8 @@ int main(int argc, char* argv[]) {
         }
         SDL_Delay(16);
     }
+    proc_tex_destroy(&g_vehicle_noise_tex);
+    proc_tex_destroy(&g_vehicle_glitch_tex);
     SDL_Quit();
     return 0;
 }

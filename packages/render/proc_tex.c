@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+void proctex_init(void) {
+    /* deterministic generators do not require runtime init */
+}
+
 static float fracf(float v) {
     return v - floorf(v);
 }
@@ -98,6 +102,49 @@ void proc_tex_upload(ProcTexture *t) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t->width, t->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, t->pixels);
     glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void proctex_upload_to_gl(ProcTexture *t) {
+    proc_tex_upload(t);
+}
+
+void proctex_make_noise_rgba(ProcTexture *t, int w, int h, uint32_t seed) {
+    if (!t || !t->pixels || t->width != w || t->height != h) return;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            size_t idx = ((size_t)y * (size_t)w + (size_t)x) * 4u;
+            float u = (float)x / (float)w;
+            float v = (float)y / (float)h;
+            float grain = value_noise_2d(u * 26.0f, v * 26.0f, (int)seed);
+            float scan = 0.9f + 0.1f * sinf(v * 130.0f + (float)(seed & 63U));
+            float base = (0.45f + 0.55f * grain) * scan;
+            if (base > 1.0f) base = 1.0f;
+            unsigned char c = (unsigned char)(base * 255.0f);
+            t->pixels[idx + 0] = c;
+            t->pixels[idx + 1] = c;
+            t->pixels[idx + 2] = c;
+            t->pixels[idx + 3] = 255;
+        }
+    }
+}
+
+void proctex_make_glitch_marks_rgba(ProcTexture *t, int w, int h, uint32_t seed) {
+    if (!t || !t->pixels || t->width != w || t->height != h) return;
+    memset(t->pixels, 0, (size_t)w * (size_t)h * 4u);
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            float n = value_noise_2d((float)x * 0.24f, (float)y * 0.24f, (int)(seed + 911));
+            float diag = fracf((float)x * 0.07f + (float)y * 0.11f + (float)(seed & 255U) * 0.001f);
+            if (n > 0.82f && diag > 0.35f && diag < 0.52f) {
+                size_t idx = ((size_t)y * (size_t)w + (size_t)x) * 4u;
+                t->pixels[idx + 0] = 240;
+                t->pixels[idx + 1] = 30;
+                t->pixels[idx + 2] = 220;
+                t->pixels[idx + 3] = 100;
+            }
+        }
+    }
 }
 
 void proc_tex_fill_emily_vibe(ProcTexture *t, float seed, float t_sec) {
