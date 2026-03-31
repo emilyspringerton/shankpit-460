@@ -144,12 +144,30 @@ void update_entity(PlayerState *p, float dt, void *server_context, unsigned int 
 
     apply_friction(p);
     float g = (p->in_jump) ? GRAVITY_FLOAT : GRAVITY_DROP;
-    p->vy -= g; 
+    if (p->dash_timer <= 0) p->vy -= g; 
     p->y += p->vy;
     
     resolve_collision(p);
-    p->x += p->vx;
-    p->z += p->vz;
+    if (p->dash_timer > 0) {
+        float nx = 0.0f, ny = 0.0f, nz = 0.0f;
+        float hit_x = 0.0f, hit_y = 0.0f, hit_z = 0.0f;
+        float next_x = p->x + p->vx;
+        float next_y = p->y;
+        float next_z = p->z + p->vz;
+        if (trace_map(p->x, p->y + 1.0f, p->z, next_x, next_y + 1.0f, next_z, &hit_x, &hit_y, &hit_z, &nx, &ny, &nz)) {
+            p->x = hit_x;
+            p->z = hit_z;
+            p->dash_timer = 0;
+            p->dash_vx = p->dash_vy = p->dash_vz = 0.0f;
+            p->vx = 0.0f; p->vy = 0.0f; p->vz = 0.0f;
+        } else {
+            p->x = next_x;
+            p->z = next_z;
+        }
+    } else {
+        p->x += p->vx;
+        p->z += p->vz;
+    }
 
     if (p->recoil_anim > 0) p->recoil_anim -= 0.1f;
     if (p->recoil_anim < 0) p->recoil_anim = 0;

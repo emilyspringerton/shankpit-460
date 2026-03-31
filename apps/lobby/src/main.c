@@ -84,6 +84,8 @@ static ProcTexture g_vehicle_glitch_tex = {0};
 
 #define Z_FAR 8000.0f
 
+static void draw_box(float w, float h, float d);
+
 int sock = -1;
 struct sockaddr_in server_addr;
 
@@ -852,6 +854,19 @@ void draw_buggy_model(PlayerState *p) {
 }
 
 void draw_gun_model(int weapon_id) {
+    if (weapon_id == WPN_KATANA) {
+        glPushMatrix();
+        glColor3f(0.15f, 0.12f, 0.08f);
+        glPushMatrix(); glTranslatef(0.0f, -0.25f, -0.65f); glScalef(0.09f, 0.09f, 0.35f); draw_box(1.0f, 1.0f, 1.0f); glPopMatrix();
+        glColor3f(0.75f, 0.78f, 0.84f);
+        glPushMatrix(); glTranslatef(0.0f, 0.0f, 0.45f); glScalef(0.05f, 0.03f, 1.4f); draw_box(1.0f, 1.0f, 1.0f); glPopMatrix();
+        glColor3f(0.0f, 0.9f, 1.0f);
+        glBegin(GL_LINES);
+        glVertex3f(0.0f, 0.02f, -0.15f); glVertex3f(0.0f, 0.02f, 1.7f);
+        glEnd();
+        glPopMatrix();
+        return;
+    }
     switch(weapon_id) {
         case WPN_KNIFE:   glColor3f(0.8f, 0.8f, 0.9f); glScalef(0.05f, 0.05f, 0.8f); break;
         case WPN_MAGNUM:  glColor3f(0.4f, 0.4f, 0.4f); glScalef(0.15f, 0.2f, 0.5f); break;
@@ -973,11 +988,15 @@ void draw_weapon_p(PlayerState *p) {
     glLoadIdentity();
     float kick = p->recoil_anim * 0.2f;
     float reload_dip = (p->reload_timer > 0) ? sinf(p->reload_timer * 0.2f) * 0.5f - 0.5f : 0.0f;
+    float slash_swing = (p->current_weapon == WPN_KATANA && p->katana_slash_timer > 0) ? ((float)p->katana_slash_timer / (float)KATANA_SLASH_ACTIVE_TICKS) : 0.0f;
+    float dash_push = (p->current_weapon == WPN_KATANA && p->dash_timer > 0) ? 0.22f : 0.0f;
     float speed = sqrtf(p->vx*p->vx + p->vz*p->vz);
     float bob = sinf(SDL_GetTicks() * 0.015f) * speed * 0.15f; 
     float x_offset = (current_fov < 50.0f) ? 0.25f : 0.4f;
-    glTranslatef(x_offset, -0.5f + kick + reload_dip + (bob * 0.5f), -1.2f + (kick * 0.5f) + bob);
-    glRotatef(-p->recoil_anim * 10.0f, 1, 0, 0);
+    if (p->current_weapon == WPN_KATANA) x_offset += 0.08f;
+    glTranslatef(x_offset + slash_swing * 0.18f, -0.5f + kick + reload_dip + (bob * 0.5f), -1.2f + (kick * 0.5f) + bob - dash_push);
+    glRotatef(-p->recoil_anim * 10.0f - slash_swing * 65.0f, 1, 0, 0);
+    glRotatef(-slash_swing * 40.0f, 0, 0, 1);
     draw_gun_model(p->current_weapon);
     glPopMatrix();
 }
@@ -989,6 +1008,7 @@ void draw_head(int weapon_id) {
         case WPN_AR:      glColor3f(0.2f, 0.3f, 0.2f); break;
         case WPN_SHOTGUN: glColor3f(0.5f, 0.3f, 0.2f); break;
         case WPN_SNIPER:  glColor3f(0.1f, 0.1f, 0.15f); break;
+        case WPN_KATANA:  glColor3f(0.0f, 0.85f, 1.0f); break;
     }
     glBegin(GL_QUADS);
     glVertex3f(-0.4, 0.8, 0.4); glVertex3f(0.4, 0.8, 0.4); glVertex3f(0.4, 0, 0.4); glVertex3f(-0.4, 0, 0.4);
@@ -1080,7 +1100,18 @@ void draw_hud(PlayerState *p) {
         draw_string(style_buf, 50, 108, 6);
     }
 
-    if (p->storm_charges > 0) {
+    if (p->current_weapon == WPN_KATANA) {
+        char katana_buf[64];
+        if (p->dash_timer > 0) {
+            snprintf(katana_buf, sizeof(katana_buf), "KATANA DASHING");
+        } else if (p->ability_cooldown == 0) {
+            snprintf(katana_buf, sizeof(katana_buf), "E: BLADE DASH READY");
+        } else {
+            snprintf(katana_buf, sizeof(katana_buf), "BLADE DASH CD: %.1f", p->ability_cooldown / 60.0f);
+        }
+        glColor3f(0.0f, 0.85f, 1.0f);
+        draw_string(katana_buf, 50, 140, 8);
+    } else if (p->storm_charges > 0) {
         char storm_buf[32];
         sprintf(storm_buf, "STORM ARROWS: %d", p->storm_charges);
         glColor3f(1.0f, 0.2f, 0.2f);
@@ -2076,7 +2107,7 @@ int main(int argc, char* argv[]) {
             int use = k[SDL_SCANCODE_F];
             int ability = k[SDL_SCANCODE_E];
             if(k[SDL_SCANCODE_1]) wpn_req=0; if(k[SDL_SCANCODE_2]) wpn_req=1;
-            if(k[SDL_SCANCODE_3]) wpn_req=2; if(k[SDL_SCANCODE_4]) wpn_req=3; if(k[SDL_SCANCODE_5]) wpn_req=4;
+            if(k[SDL_SCANCODE_3]) wpn_req=2; if(k[SDL_SCANCODE_4]) wpn_req=3; if(k[SDL_SCANCODE_5]) wpn_req=4; if(k[SDL_SCANCODE_6]) wpn_req=5;
 
             int fov_pid = (app_state == STATE_GAME_NET && net_local_pid > 0 && local_state.players[net_local_pid].active)
                 ? net_local_pid

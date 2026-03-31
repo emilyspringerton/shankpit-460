@@ -115,6 +115,14 @@ void test_scene_fields() {
     ASSERT_EQ(np.scene_id, SCENE_STADIUM, "NetPlayer stores scene_id");
 }
 
+void test_katana_contract() {
+    printf("--- Testing Katana Contract ---\n");
+    ASSERT_EQ(MAX_WEAPONS, 6, "MAX_WEAPONS includes katana");
+    ASSERT_EQ(WPN_KATANA, 5, "Katana weapon enum appended");
+    ASSERT_EQ(WPN_STATS[WPN_KATANA].ammo_max, 0, "Katana uses no ammo");
+    ASSERT_TRUE(sizeof(((PlayerState*)0)->dash_hit_targets) / sizeof(int) == 8, "Dash hit registry stored in PlayerState");
+}
+
 int main() {
     printf("🛡️ SHANKPIT PROTOCOL VERIFICATION 🛡️\n");
     test_packet_structure();
@@ -122,6 +130,7 @@ int main() {
     test_simulation_delta();
     test_button_bits();
     test_scene_fields();
+    test_katana_contract();
     test_rotation_wire_roundtrip();
     
     printf("\n--------------------------------------\n");
