@@ -34,10 +34,10 @@ own match-format specifics (deathmatch, not poker hands).
 
 | Need | Reuse from | Status |
 |---|---|---|
-| Accounts / identity | VS0 (`IDUNA/docs/kikoryu/VS0_IDENTITY_GATE.md`) — Google OAuth, `gamertag`, THE_HONOR_CODE | **Already built for SHANKPIT specifically**: `IDUNA/internal/http/handlers/shankpit_auth.go` — full OAuth flow, issues an IDUNA JWT with `player_id`/`display_name`, redirects to `shankpit://auth?token=...`. Gap: the actual game server (`apps/server/src/main.c`) never validates this token — `PACKET_CONNECT` accepts any UDP packet with no auth check at all. |
-| Match lifecycle | VS2's state machine shape (`CREATED → REGISTERING → STARTING → IN_PROGRESS → COMPLETE`), not its poker mechanics | Not built. See §3. |
+| Accounts / identity | VS0 (`IDUNA/docs/kikoryu/VS0_IDENTITY_GATE.md`) — Google OAuth, `gamertag`, THE_HONOR_CODE | **Built and live (S156-02, 2026-07-18)**: `IDUNA/internal/http/handlers/shankpit_auth.go` (OAuth flow, issues IDUNA JWT) + `shankpit_ticket.go` (`POST /api/v1/shankpit/ticket` mints a short-lived HMAC-SHA256 connect ticket bound to `player_id`). `apps/server/src/main.c`'s `verify_connect_ticket` now checks every `PACKET_CONNECT` before allocating a slot, fails closed if `SHANKPIT_TICKET_SECRET` is unset, and enforces one-seat-per-identity via `find_slot_by_player_id`. (Design note: this uses a game-specific HMAC ticket, not JWT-in-C — founder chose that over implementing ECDSA verification in C.) |
+| Match lifecycle | VS2's state machine shape (`CREATED → REGISTERING → STARTING → IN_PROGRESS → COMPLETE`), not its poker mechanics | **Built and live (S156-01/03).** `IDUNA/internal/http/handlers/shankpit_queue.go` implements `QUEUING → matched` (v0 collapses STARTING into the match response, since there's only one server to connect to). `apps/server/src/main.c`'s `complete_match()` provides the round-boundary/COMPLETE trigger. See §3. |
 | "No backpack" | VS2's **closed, non-redeemable economy** doctrine, verbatim: "chips exist only inside a tournament instance; every entrant starts with an equal stack. No persistent bankroll, no farming." | Already true of the running server's actual behavior — `phys_respawn` resets every player to a default loadout on spawn/respawn, no persistent inventory exists anywhere in `PlayerState`. **This is a non-goal to formally adopt, not a system to build.** |
-| Stats / standings | VS10 (`IDUNA/docs/kikoryu/VS10_SCOREBOARDS.md`) — "derived recomputable projections... permanent archive" | Partially built: `IDUNA/internal/http/handlers/players.go` already has `GET /api/v1/players?sort=kills&limit=N` (leaderboard) and a per-player profile endpoint; `emily shankpit leaderboard` (emily.cli) already consumes it. Gap: nothing in shankpit-460 ever writes to it — see §4. |
+| Stats / standings | VS10 (`IDUNA/docs/kikoryu/VS10_SCOREBOARDS.md`) — "derived recomputable projections... permanent archive" | **Built and live (S156-04).** `IDUNA/internal/http/handlers/players.go`'s `GET /api/v1/players?sort=kills&limit=N` (leaderboard) and per-player profile endpoint are now actively written to: `complete_match()` POSTs kills/deaths per `player_id` to `POST /api/v1/players/{id}/session` on every match completion, authenticated as the new `SHANKPIT460-SERVER` M2M agent (gated behind a new `shankpit.match.write` permission — that endpoint previously had no permission check at all, a real gap found and closed alongside this work). Only the static web stats page (§4 frontend half, S156-05) remains open. |
 | Reputation (later, not v0) | VS9 (`IDUNA/docs/kikoryu/VS9_REPUTATION.md`) — reliability/conduct signals | Not needed for "keep simple to start"; noted as the natural next layer once matchmaking exists (abandon-rate-aware queue priority). |
 
 ## 2. Accounts (v0)
@@ -120,21 +120,24 @@ archive") and onto endpoints that already exist:
   match-end condition (timer, score cap, or an admin/director action) added to the real server
   before match results can ever be written — this is new server logic, not just wiring existing
   logic into the queue.
-- Connect-packet JWT framing: extend the existing `NetHeader`+payload shape, or version the
-  protocol? Given three incompatible server implementations already exist in this repo
-  (`EMILY/BACKLOG.md` SECTION 155), any protocol change here should be the one moment this gets
-  cleaned up, not another silent fork.
+- ~~Connect-packet JWT framing: extend the existing `NetHeader`+payload shape, or version the
+  protocol?~~ **Resolved 2026-07-18 (S156-02)**: not JWT-in-C at all — founder chose a simple
+  HMAC-SHA256 session ticket instead (IDUNA mints, C server verifies locally with no crypto
+  library and no I/O), appended after the existing 12-byte `NetHeader`. Avoids the protocol-version
+  question entirely for this cut.
 - Where does the stats page actually live (okemily.com path vs. new `shankpit.` subdomain)? Ties
   to FATES (`HQ-SPEC-INFRA-105`) naming doctrine, not a call to make in isolation.
 
 ## Build order
 
-1. Verify match/round-boundary reality server-side (open question above) before anything else.
-2. Wire JWT auth into `PACKET_CONNECT` (§2) — this is the actual prerequisite for everything
-   else; matchmaking and stats are both meaningless without real per-account identity.
-3. Minimal queue + QUEUING/STARTING/IN_PROGRESS/COMPLETE state machine (§3).
-4. Match-result event → existing `/api/v1/players` projection (§4 backend half).
-5. Static stats page (§4 frontend half) — smallest, most independently shippable piece; could
-   even land before §3 against manually-entered/test data if sequencing makes sense.
+1. ✅ Verify match/round-boundary reality server-side (open question above) before anything else. — S156-01, done.
+2. ✅ Wire connect-ticket auth into `PACKET_CONNECT` (§2) — this is the actual prerequisite for everything
+   else; matchmaking and stats are both meaningless without real per-account identity. — S156-02, done.
+3. ✅ Minimal queue + QUEUING/matched state machine (§3). — S156-03, done.
+4. ✅ Match-result event → existing `/api/v1/players` projection (§4 backend half). — S156-04, done
+   (scoped down from "event-sourced" to a direct counter-increment call against the endpoint that
+   already existed — reuse over redesign).
+5. ⬜ Static stats page (§4 frontend half) — smallest, most independently shippable piece — the
+   only item still open. See `EMILY/BACKLOG.md` SECTION 156, S156-05.
 
 Golden-indexed as SHANKPIT460-NORTH once landed (`EMILY/context/golden-docs-index.md`).
