@@ -22,6 +22,7 @@
 #include "../../../packages/common/shared_movement.h"
 #include "../../../packages/common/net_sim.h"
 #include "../../../packages/common/hmac_sha256.h"
+#include "../../../packages/common/http_client.h"
 #include "../../../packages/simulation/local_game.h"
 #include "server_mode.h"
 #include "server_state.h"
@@ -48,6 +49,18 @@ unsigned int client_last_seq[MAX_CLIENTS];
 #define TICKET_TOTAL_LEN (TICKET_PAYLOAD_LEN + TICKET_MAC_LEN) // 36
 static unsigned char ticket_secret[256];
 static int ticket_secret_len = 0;
+
+// IDUNA agent config (S156-04, EMILY/BACKLOG.md SECTION 156) — used to
+// authenticate as the SHANKPIT460-SERVER M2M agent (config/agents.json)
+// and report match results. Same env var names used across the rest of
+// the monorepo (see CLAUDE.md's "Key Env Vars"). Missing config means
+// reporting is silently skipped (soft warn) -- this is telemetry, not
+// identity/security, so unlike ticket_secret it does NOT fail closed.
+static char iduna_host[128] = "127.0.0.1";
+static int iduna_port = 8080;
+static char iduna_agent_name[128] = "";
+static char iduna_agent_secret[256] = "";
+static int iduna_agent_configured = 0;
 
 typedef struct {
     int active;
@@ -243,6 +256,114 @@ static void load_ticket_secret(void) {
     printf("SHANKPIT_TICKET_SECRET loaded (%d bytes)\n", ticket_secret_len);
 }
 
+// load_iduna_agent_config reads IDUNA_BASE_URL / IDUNA_AGENT_NAME /
+// IDUNA_AGENT_SECRET at startup. IDUNA_BASE_URL may be "host:port" or a
+// full "http://host:port" URL (scheme and any trailing path are stripped);
+// defaults to 127.0.0.1:8080 if unset.
+static void load_iduna_agent_config(void) {
+    const char *base_url = getenv("IDUNA_BASE_URL");
+    if (base_url && base_url[0]) {
+        const char *host_start = base_url;
+        if (strncmp(host_start, "http://", 7) == 0) host_start += 7;
+        else if (strncmp(host_start, "https://", 8) == 0) host_start += 8;
+
+        char host_buf[128];
+        strncpy(host_buf, host_start, sizeof(host_buf) - 1);
+        host_buf[sizeof(host_buf) - 1] = '\0';
+        char *slash = strchr(host_buf, '/');
+        if (slash) *slash = '\0';
+
+        char *colon = strchr(host_buf, ':');
+        int port = iduna_port;
+        if (colon) {
+            port = atoi(colon + 1);
+            *colon = '\0';
+        }
+        strncpy(iduna_host, host_buf, sizeof(iduna_host) - 1);
+        iduna_host[sizeof(iduna_host) - 1] = '\0';
+        if (port > 0) iduna_port = port;
+    }
+
+    const char *name = getenv("IDUNA_AGENT_NAME");
+    const char *secret = getenv("IDUNA_AGENT_SECRET");
+    if (name && name[0] && secret && secret[0]) {
+        strncpy(iduna_agent_name, name, sizeof(iduna_agent_name) - 1);
+        iduna_agent_name[sizeof(iduna_agent_name) - 1] = '\0';
+        strncpy(iduna_agent_secret, secret, sizeof(iduna_agent_secret) - 1);
+        iduna_agent_secret[sizeof(iduna_agent_secret) - 1] = '\0';
+        iduna_agent_configured = 1;
+        printf("IDUNA agent configured: name=%s host=%s:%d (match results will be reported)\n",
+               iduna_agent_name, iduna_host, iduna_port);
+    } else {
+        printf("WARNING: IDUNA_AGENT_NAME/IDUNA_AGENT_SECRET not set -- match results will NOT be reported to IDUNA (S156-04)\n");
+    }
+}
+
+// uuid_bytes_to_string formats 16 raw bytes as a standard 8-4-4-4-12
+// hyphenated hex UUID string (out must be at least 37 bytes) — the form
+// IDUNA's player endpoints expect in the URL path.
+static void uuid_bytes_to_string(const unsigned char b[16], char out[37]) {
+    snprintf(out, 37,
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
+
+// report_match_results POSTs kills/deaths to IDUNA for every active,
+// authenticated (has_player_id) client. Best-effort: IDUNA being briefly
+// unreachable must never block match completion or the round timer, so
+// every failure here is logged and swallowed rather than fatal — unlike
+// ticket verification (S156-02), which fails closed because it gates
+// identity, not telemetry.
+static void report_match_results(void) {
+    if (!iduna_agent_configured) return;
+
+    char auth_body[512];
+    snprintf(auth_body, sizeof(auth_body),
+             "{\"agent_name\":\"%s\",\"agent_secret\":\"%s\"}",
+             iduna_agent_name, iduna_agent_secret);
+
+    char auth_resp[4096];
+    int auth_status = 0;
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/auth/agent", NULL,
+                        auth_body, auth_resp, sizeof(auth_resp), &auth_status) != 0 ||
+        auth_status != 200) {
+        printf("MATCH_REPORT: failed to authenticate as %s (status=%d) -- skipping result upload this match\n",
+               iduna_agent_name, auth_status);
+        return;
+    }
+
+    char token[2048];
+    if (!http_extract_json_string_field(auth_resp, "access_token", token, sizeof(token))) {
+        printf("MATCH_REPORT: auth response had no access_token field -- skipping result upload this match\n");
+        return;
+    }
+
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        PlayerState *p = &local_state.players[i];
+        if (!slots[i].active || !p->has_player_id) continue;
+
+        char uuid_str[37];
+        uuid_bytes_to_string(p->player_id, uuid_str);
+
+        char path[128];
+        snprintf(path, sizeof(path), "/api/v1/players/%s/session", uuid_str);
+
+        char body[128];
+        snprintf(body, sizeof(body), "{\"kills\":%d,\"deaths\":%d}", p->kills, p->deaths);
+
+        char resp[512];
+        int status = 0;
+        if (http_post_json(iduna_host, iduna_port, path, token, body, resp, sizeof(resp), &status) != 0) {
+            printf("MATCH_REPORT: network error reporting client=%d player_id=%s\n", i, uuid_str);
+        } else if (status != 200) {
+            printf("MATCH_REPORT: IDUNA rejected result for client=%d player_id=%s status=%d\n", i, uuid_str, status);
+        } else {
+            printf("MATCH_REPORT: reported client=%d player_id=%s kills=%d deaths=%d\n", i, uuid_str, p->kills, p->deaths);
+        }
+    }
+}
+
 static int recorder_pick_target() {
     if (recorder.target_id >= 0 && recorder.target_id < MAX_CLIENTS) {
         if (local_state.players[recorder.target_id].active) {
@@ -385,6 +506,7 @@ int parse_match_minutes(int argc, char **argv) {
 void complete_match(int match_minutes) {
     local_state.match_number++;
     printf("MATCH_COMPLETE number=%d\n", local_state.match_number);
+    report_match_results(); // S156-04 — must run before kills/deaths reset below
     for (int i = 0; i < MAX_CLIENTS; i++) {
         PlayerState *p = &local_state.players[i];
         if (!p->active) continue;
@@ -584,6 +706,7 @@ int main(int argc, char *argv[]) {
 
     server_net_init();
     load_ticket_secret();
+    load_iduna_agent_config();
     int mode = parse_server_mode(argc, argv);
     int match_minutes = parse_match_minutes(argc, argv);
     local_init_match(1, mode);
