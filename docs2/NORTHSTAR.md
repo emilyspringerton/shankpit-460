@@ -10,7 +10,13 @@ Low system specs required, competitive-first, not persistent-world-first.
 **New scope, this pass (founder, 2026-07-18, verbatim across several messages):**
 "esports will need accounts and at least basic matchmaking skip the backpack problem keep it
 simple to start" / "refer to the 14 iduna northstars to see how shankpit esports might fit into
-concepts established in those docs" / "basic web based stats like league of legends"
+concepts established in those docs" / "basic web based stats like league of legends" / "we need a
+name for the social tournament platform norse theme simple short memorable maybe we call it WOTAN"
+
+**Name: WOTAN.** The platform this document scopes (§1–4) — VS2-shaped tournament identity,
+matchmaking, and stats, of which SHANKPIT-460 is the first game. Live at
+`okemily.com/tournaments.html`. Norse-mythic naming continues this codebase's existing convention
+(NORN, FATES, KIKORYU) rather than introducing a new one.
 
 ---
 
