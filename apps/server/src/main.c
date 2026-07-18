@@ -467,13 +467,14 @@ int main(int argc, char *argv[]) {
         for(int i=0; i<MAX_CLIENTS; i++) {
             PlayerState *p = &local_state.players[i];
 
-            if (i > 0 && p->active && p->state == STATE_DEAD) {
-                if (local_state.game_mode != MODE_SURVIVAL && now > p->respawn_time) {
-                    phys_respawn(p, now);
-                    p->yaw = 0.0f;
-                    p->pitch = 0.0f;
-                }
-            }
+            // Respawn-on-death is handled by update_entity's
+            // respawn_delay_ticks countdown (packages/simulation/local_game.h,
+            // called below for STATE_DEAD players) — not here. This used to
+            // duplicate that with a timestamp check against p->respawn_time,
+            // but respawn_time is always 0 (nothing sets it otherwise), so
+            // `now > p->respawn_time` was always true — an unconditional,
+            // same-tick respawn that raced ahead of any real delay. See
+            // EMILY/BACKLOG.md SECTION 155 S155-03.
 
             if (p->active && p->state != STATE_DEAD) {
                 phys_set_scene(p->scene_id);

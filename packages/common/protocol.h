@@ -142,6 +142,7 @@ typedef struct {
     BotGenome brain;
     unsigned int last_hit_time;
     unsigned int respawn_time;
+    int respawn_delay_ticks; // ticks remaining in STATE_DEAD before phys_respawn fires; see update_entity
     int storm_charges;
     int ability_cooldown;
     int katana_slash_timer;

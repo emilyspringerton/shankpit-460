@@ -126,7 +126,19 @@ void bot_think(int bot_idx, PlayerState *players, float *out_fwd, float *out_yaw
 // --- UPDATE LOOP ---
 void update_entity(PlayerState *p, float dt, void *server_context, unsigned int cmd_time) {
     if (!p->active) return;
-    if (p->state == STATE_DEAD) return;
+    if (p->state == STATE_DEAD) {
+        // Counts down the delay set by katana_apply_damage on death (see
+        // EMILY/BACKLOG.md SECTION 155 S155-03). Called once per tick for
+        // every STATE_DEAD player by apps/server/src/main.c's main loop, so
+        // this is the natural place to trigger the eventual respawn.
+        if (p->respawn_delay_ticks > 0) {
+            p->respawn_delay_ticks--;
+            if (p->respawn_delay_ticks <= 0) {
+                phys_respawn(p, cmd_time);
+            }
+        }
+        return;
+    }
 
     phys_set_scene(p->scene_id);
 

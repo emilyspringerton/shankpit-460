@@ -43,6 +43,13 @@
 #define KATANA_DASH_HIT_RADIUS_SQ (KATANA_DASH_HIT_RADIUS * KATANA_DASH_HIT_RADIUS)
 #define KATANA_DASH_HIT_MAX 8
 
+// ~2.9s at the server's 16ms tick — long enough to survive one
+// SERVER_SNAPSHOT_INTERVAL_TICKS-spaced broadcast (currently 3 ticks,
+// ~48ms) so STATE_DEAD is actually observable over the network. Before
+// this, death respawned synchronously within the same tick as the kill and
+// was never broadcast at all (EMILY/BACKLOG.md SECTION 155 S155-03).
+#define RESPAWN_DELAY_TICKS 180
+
 void evolve_bot(PlayerState *loser, PlayerState *winner);
 PlayerState* get_best_bot();
 void phys_respawn(PlayerState *p, unsigned int now);
@@ -488,7 +495,14 @@ static inline void katana_apply_damage(PlayerState *attacker, PlayerState *targe
         target->deaths++;
         attacker->accumulated_reward += 1000.0f;
         attacker->hit_feedback = 30;
-        phys_respawn(target, 0);
+        // Don't respawn synchronously — that left STATE_DEAD unobservable
+        // over the network (never survived to the next snapshot broadcast).
+        // Go dead for RESPAWN_DELAY_TICKS instead; update_entity (called
+        // every tick for STATE_DEAD players, see apps/server/src/main.c's
+        // main loop) counts it down and calls phys_respawn() when it hits 0.
+        target->health = 0;
+        target->state = STATE_DEAD;
+        target->respawn_delay_ticks = RESPAWN_DELAY_TICKS;
     }
 }
 
@@ -689,7 +703,7 @@ void resolve_collision(PlayerState *p) {
 
 void phys_respawn(PlayerState *p, unsigned int now) {
     p->active = 1; p->state = STATE_ALIVE;
-    p->health = 100; p->shield = 100; p->respawn_time = 0; p->in_vehicle = 0;
+    p->health = 100; p->shield = 100; p->respawn_time = 0; p->respawn_delay_ticks = 0; p->in_vehicle = 0;
     p->katana_slash_timer = 0;
     p->dash_timer = 0;
     p->dash_vx = p->dash_vy = p->dash_vz = 0.0f;
