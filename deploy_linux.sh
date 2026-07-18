@@ -13,7 +13,7 @@ cd ../..
 
 # 3. Compile Game Server
 echo "🛠️ Building Game Server..."
-gcc services/game-server/src/server.c -o bin/shank_server -lm
+make server
 
 # 4. Config
 echo "⚙️ Writing Config..."
