@@ -1,3 +1,18 @@
+# SHANKPIT-460
+
+**This is `shankpit-460`** — forked from [`SHANKPIT`](https://github.com/emilyspringerton/SHANKPIT)
+at tag `460` (2026-07-18). It diverges from the parent project from here forward with a distinct
+mission: a stripped-down, low-system-spec competitive esports FPS, aimed at a large global
+audience precisely *because* it can run on modest hardware. It deliberately does not carry forward
+SHANKPIT's persistent-world (DragonsNShit) ambitions, season lineage, or BedWars layer — those stay
+in the parent repo. See `CLAUDE.md` for the full mission statement and current status (as of the
+fork, a design/stripping plan hasn't been written yet — that's the next real step).
+
+The architecture below describes the codebase as inherited at the fork point; it hasn't been
+re-audited against the new mission yet.
+
+---
+
 # SHANKPIT Game Architecture Document
 
 ## Overview
