@@ -29,10 +29,22 @@
 //	go run ./apps2/emily-bot -bots 20 -duration 2m         # concurrent-load smoke test
 //	go run ./apps2/emily-bot -bots 2 -duration 20s -v      # visibility/damage check, verbose
 //	go run ./apps2/emily-bot -report                       # post an Emily observation with the result
+//	go run ./apps2/emily-bot -bad-ticket                   # negative test: expect rejection
+//	go run ./apps2/emily-bot -no-ticket                    # negative test: expect rejection
+//	go run ./apps2/emily-bot -bots 3 -same-identity        # one-seat-per-identity test: expect exactly 1 welcomed
 //	GOWORK=off go build -o bin/emily-bot ./apps2/emily-bot
+//
+// Connect tickets (S156-02): normal runs mint a real ticket via
+// -ticket-secret (defaults to $SHANKPIT_TICKET_SECRET) using the same
+// HMAC-SHA256 algorithm as IDUNA's ShankpitTicketHandler and the C
+// server's verify_connect_ticket. Without a secret configured, connects
+// will be rejected by any server with S156-02 auth enabled (fail closed).
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -69,6 +81,12 @@ const (
 	netHeaderSize = 12 // type@0 client_id@1 sequence@2(u16) timestamp@4(u32) entity_count@8 scene_id@9 [2 pad]
 	userCmdSize   = 36 // sequence@0(u32) timestamp@4(u32) msec@8(u16)[2 pad] fwd@12 str@16 yaw@20 pitch@24 buttons@28 weapon_idx@32
 	netPlayerSize = 44 // id@0 scene_id@1 [2 pad] last_seq@4(u32) x@8 y@12 z@16 yaw@20 pitch@24 current_weapon@28 state@29 health@30 shield@31 is_shooting@32 crouching@33 [2 pad] reward_feedback@36(f32) ammo@40 in_vehicle@41 hit_feedback@42 storm_charges@43
+
+	// Connect-ticket wire format (S156-02) — must match TICKET_PAYLOAD_LEN/
+	// TICKET_MAC_LEN in apps/server/src/main.c exactly.
+	ticketPayloadLen = 20 // player_id(16) + expires_at(4, LE u32)
+	ticketMACLen     = 16 // truncated HMAC-SHA256
+	ticketTTL        = 5 * time.Minute
 
 	tickInterval = 50 * time.Millisecond // 20 Hz
 	fireInterval = 300 * time.Millisecond
@@ -116,10 +134,28 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose per-packet logging")
 	report := flag.Bool("report", false, "post a summary to Emily Prime via `emily observe` when done")
 	weapon := flag.Int("weapon", -1, "lock to one weapon (0=knife 1=magnum 2=ar 3=shotgun 4=sniper 5=katana); -1 cycles through all six")
+	ticketSecret := flag.String("ticket-secret", os.Getenv("SHANKPIT_TICKET_SECRET"), "shared secret for minting connect tickets (S156-02); defaults to $SHANKPIT_TICKET_SECRET")
+	badTicket := flag.Bool("bad-ticket", false, "negative test: send a ticket with a corrupted MAC, expect the server to reject it")
+	noTicket := flag.Bool("no-ticket", false, "negative test: send a bare pre-auth connect with no ticket at all, expect rejection")
+	sameIdentity := flag.Bool("same-identity", false, "one-seat-per-identity test: all bots mint tickets for the same fixed player_id, expect only the first connect to be welcomed")
 	flag.Parse()
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
+	negativeTest := *badTicket || *noTicket
 	fmt.Printf("[emily-bot] launching %d bot(s) against %s for %s\n", *bots, addr, *duration)
+	if negativeTest {
+		fmt.Println("[emily-bot] negative-auth-test mode: expecting the server to REJECT these connects")
+	} else if *sameIdentity {
+		fmt.Println("[emily-bot] one-seat-per-identity test mode: expecting only the FIRST connect to be welcomed")
+	} else if *ticketSecret == "" {
+		fmt.Println("[emily-bot] WARNING: no ticket secret (-ticket-secret or $SHANKPIT_TICKET_SECRET) — connects will use an invalid all-zero ticket and are expected to be rejected by any server with S156-02 auth enabled")
+	}
+
+	var fixedPlayerID []byte
+	if *sameIdentity {
+		fixedPlayerID = make([]byte, 16)
+		_, _ = rand.Read(fixedPlayerID)
+	}
 
 	stats := make([]*botStats, *bots)
 	var wg sync.WaitGroup
@@ -130,11 +166,33 @@ func main() {
 		wg.Add(1)
 		go func(s *botStats) {
 			defer wg.Done()
-			runBot(*host, *port, *duration, *verbose, *weapon, s)
+			runBot(*host, *port, *duration, *verbose, *weapon, []byte(*ticketSecret), *badTicket, *noTicket, fixedPlayerID, s)
 		}(s)
 		time.Sleep(20 * time.Millisecond) // stagger connects
 	}
 	wg.Wait()
+
+	if negativeTest {
+		pass := summarizeNegativeTest(stats, addr)
+		if *report {
+			postObservation(stats, addr, pass)
+		}
+		if !pass {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *sameIdentity {
+		pass := summarizeSameIdentity(stats, addr)
+		if *report {
+			postObservation(stats, addr, pass)
+		}
+		if !pass {
+			os.Exit(1)
+		}
+		return
+	}
 
 	pass := summarize(stats, addr, *duration, *bots > 1)
 	if *report {
@@ -145,7 +203,7 @@ func main() {
 	}
 }
 
-func runBot(host string, port int, duration time.Duration, verbose bool, lockWeapon int, s *botStats) {
+func runBot(host string, port int, duration time.Duration, verbose bool, lockWeapon int, ticketSecret []byte, badTicket, noTicket bool, fixedPlayerID []byte, s *botStats) {
 	udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		s.lastErr.Store(fmt.Sprintf("resolve addr: %v", err))
@@ -170,7 +228,12 @@ func runBot(host string, port int, duration time.Duration, verbose bool, lockWea
 	var closeOnce sync.Once
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 
-	sendHeader(conn, packetConnect)
+	if noTicket {
+		sendHeader(conn, packetConnect) // bare pre-auth connect, negative test only
+	} else {
+		ticket := mintTicket(ticketSecret, ticketTTL, badTicket, fixedPlayerID)
+		sendConnectWithTicket(conn, ticket)
+	}
 	go func() {
 		defer closeDone()
 		buf := make([]byte, 4096)
@@ -375,11 +438,52 @@ func nearestPeer(peers map[uint8]*peer, myX, myZ float32) (*peer, float32) {
 }
 
 // sendHeader sends a bare NetHeader with only the type byte meaningful —
-// used for PACKET_CONNECT and PACKET_DISCONNECT, both of which
-// server_handle_packet dispatches on head->type alone.
+// used for PACKET_DISCONNECT, which server_handle_packet dispatches on
+// head->type alone (no ticket required to disconnect).
 func sendHeader(conn *net.UDPConn, packetType byte) {
 	buf := make([]byte, netHeaderSize)
 	buf[0] = packetType
+	_, _ = conn.Write(buf)
+}
+
+// mintTicket builds a connect ticket using the exact same algorithm as
+// IDUNA's ShankpitTicketHandler (internal/http/handlers/shankpit_ticket.go)
+// and the C server's verify_connect_ticket — 16 random bytes standing in
+// for a player_id (a real client would get a real UUID-derived one from
+// IDUNA; for this headless QA tool, any 16 bytes exercises the same
+// verification path), a 4-byte little-endian expiry, and a 16-byte
+// truncated HMAC-SHA256 over the first 20 bytes. corruptMAC exists purely
+// for the negative-test path (-bad-ticket): flips a bit so the server's
+// verification is expected to fail closed.
+func mintTicket(secret []byte, ttl time.Duration, corruptMAC bool, fixedPlayerID []byte) []byte {
+	playerID := fixedPlayerID
+	if playerID == nil {
+		playerID = make([]byte, 16)
+		_, _ = rand.Read(playerID)
+	}
+
+	payload := make([]byte, ticketPayloadLen)
+	copy(payload[:16], playerID)
+	binary.LittleEndian.PutUint32(payload[16:20], uint32(time.Now().Add(ttl).Unix()))
+
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(payload)
+	fullMAC := mac.Sum(nil)
+
+	ticket := append(payload, fullMAC[:ticketMACLen]...)
+	if corruptMAC {
+		ticket[len(ticket)-1] ^= 0xFF
+	}
+	return ticket
+}
+
+// sendConnectWithTicket sends PACKET_CONNECT with a ticket appended after
+// the NetHeader — [0:12]=NetHeader(type=0) [12:48]=ticket(36 bytes),
+// matching verify_connect_ticket's expected layout exactly.
+func sendConnectWithTicket(conn *net.UDPConn, ticket []byte) {
+	buf := make([]byte, netHeaderSize+len(ticket))
+	buf[0] = packetConnect
+	copy(buf[netHeaderSize:], ticket)
 	_, _ = conn.Write(buf)
 }
 
@@ -426,6 +530,53 @@ func weaponsSeenNames(mask uint32) string {
 		}
 	}
 	return out
+}
+
+// summarizeNegativeTest reports PASS only if every bot was correctly
+// REJECTED (never welcomed) — the expected outcome for -bad-ticket/-no-ticket
+// runs. A bot that got welcomed here means the server accepted a connect it
+// should have rejected, which is a real auth bug, not a soft failure.
+func summarizeNegativeTest(stats []*botStats, addr string) bool {
+	fmt.Printf("\n[emily-bot] negative auth test complete — %d bot(s) vs %s\n", len(stats), addr)
+	fmt.Printf("%-6s %-18s\n", "bot", "correctly_rejected")
+	pass := true
+	for _, s := range stats {
+		rejected := !s.welcomed.Load()
+		if !rejected {
+			pass = false
+		}
+		fmt.Printf("%-6d %-18v\n", s.idx, rejected)
+	}
+	if pass {
+		fmt.Println("[emily-bot] PASS — server correctly rejected every connect attempt")
+	} else {
+		fmt.Println("[emily-bot] FAIL — server welcomed a connect that should have been rejected")
+	}
+	return pass
+}
+
+// summarizeSameIdentity reports PASS only if EXACTLY ONE bot was welcomed —
+// all bots minted tickets for the same fixed player_id (staggered connects,
+// see main), so the server's find_slot_by_player_id one-seat-per-identity
+// check should let the first through and reject every later duplicate.
+func summarizeSameIdentity(stats []*botStats, addr string) bool {
+	fmt.Printf("\n[emily-bot] one-seat-per-identity test complete — %d bot(s) vs %s\n", len(stats), addr)
+	fmt.Printf("%-6s %-10s\n", "bot", "welcomed")
+	welcomedCount := 0
+	for _, s := range stats {
+		w := s.welcomed.Load()
+		if w {
+			welcomedCount++
+		}
+		fmt.Printf("%-6d %-10v\n", s.idx, w)
+	}
+	pass := welcomedCount == 1
+	if pass {
+		fmt.Println("[emily-bot] PASS — exactly one connect for the shared identity was welcomed, the rest correctly rejected")
+	} else {
+		fmt.Printf("[emily-bot] FAIL — expected exactly 1 welcomed bot for the shared identity, got %d\n", welcomedCount)
+	}
+	return pass
 }
 
 func summarize(stats []*botStats, addr string, duration time.Duration, requirePeerVisibility bool) bool {

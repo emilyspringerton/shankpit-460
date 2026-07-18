@@ -21,6 +21,7 @@
 #include "../../../packages/common/physics.h"
 #include "../../../packages/common/shared_movement.h"
 #include "../../../packages/common/net_sim.h"
+#include "../../../packages/common/hmac_sha256.h"
 #include "../../../packages/simulation/local_game.h"
 #include "server_mode.h"
 #include "server_state.h"
@@ -33,6 +34,20 @@ unsigned int client_last_seq[MAX_CLIENTS];
 // ticks/sec -> exactly 3750 ticks/minute.
 #define TICKS_PER_MINUTE 3750
 #define DEFAULT_MATCH_MINUTES 10
+
+// Connect-ticket verification (S156-02, EMILY/BACKLOG.md SECTION 156).
+// Wire format (36 bytes total, appended after the 12-byte NetHeader in a
+// PACKET_CONNECT payload): player_id (16 raw UUID bytes) || expires_at
+// (4-byte little-endian unix timestamp) || HMAC-SHA256(secret, the first
+// 20 bytes) truncated to 16 bytes. Minted by IDUNA's ShankpitTicketHandler
+// (internal/http/handlers/shankpit_ticket.go) — the two sides must agree
+// on the SHANKPIT_TICKET_SECRET env var byte-for-byte (raw string bytes,
+// not hex-decoded — see that handler's doc comment).
+#define TICKET_PAYLOAD_LEN 20  // player_id(16) + expires_at(4)
+#define TICKET_MAC_LEN 16      // truncated HMAC-SHA256
+#define TICKET_TOTAL_LEN (TICKET_PAYLOAD_LEN + TICKET_MAC_LEN) // 36
+static unsigned char ticket_secret[256];
+static int ticket_secret_len = 0;
 
 typedef struct {
     int active;
@@ -164,6 +179,68 @@ static int ensure_slot_for_sender(const struct sockaddr_in *sender) {
         send_welcome(sender, new_slot);
     }
     return new_slot;
+}
+
+// find_slot_by_player_id returns the active slot already authenticated as
+// the given real (IDUNA-issued) player_id, or -1 if none. Enforces
+// one-seat-per-identity (VS2 hard constraint) — a second concurrent
+// connect for an already-connected player_id is rejected, not migrated.
+static int find_slot_by_player_id(const unsigned char player_id[16]) {
+    for (int i = 1; i < MAX_CLIENTS; i++) {
+        if (slots[i].active && local_state.players[i].has_player_id &&
+            memcmp(local_state.players[i].player_id, player_id, 16) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// verify_connect_ticket checks the ticket appended to a PACKET_CONNECT
+// payload (see TICKET_TOTAL_LEN's doc comment for the wire format). On
+// success writes the 16-byte player_id to out_player_id and returns 1;
+// otherwise returns 0 without writing anything. Fails closed: if the
+// server has no secret configured at all, every ticket is rejected rather
+// than silently accepting unauthenticated connects (see load_ticket_secret).
+static int verify_connect_ticket(const char *buffer, int size, unsigned char out_player_id[16]) {
+    if (ticket_secret_len == 0) return 0;
+    if (size < (int)sizeof(NetHeader) + TICKET_TOTAL_LEN) return 0;
+
+    const unsigned char *ticket = (const unsigned char *)(buffer + sizeof(NetHeader));
+    const unsigned char *payload = ticket;            // player_id(16) + expires_at(4)
+    const unsigned char *given_mac = ticket + TICKET_PAYLOAD_LEN;
+
+    unsigned char expected_mac[32];
+    hmac_sha256(ticket_secret, (size_t)ticket_secret_len, payload, TICKET_PAYLOAD_LEN, expected_mac);
+    if (!hmac_sha256_verify(given_mac, expected_mac, TICKET_MAC_LEN)) {
+        return 0;
+    }
+
+    unsigned int expires_at =
+        (unsigned int)payload[16] | ((unsigned int)payload[17] << 8) |
+        ((unsigned int)payload[18] << 16) | ((unsigned int)payload[19] << 24);
+    if ((unsigned int)time(NULL) > expires_at) {
+        return 0; // ticket expired
+    }
+
+    memcpy(out_player_id, payload, 16);
+    return 1;
+}
+
+// load_ticket_secret reads SHANKPIT_TICKET_SECRET at startup. Deliberately
+// no fallback/default: an unset secret means ticket_secret_len stays 0,
+// which verify_connect_ticket treats as "reject everything" — fail closed,
+// not fail open, if this gets deployed without the secret provisioned.
+static void load_ticket_secret(void) {
+    const char *env = getenv("SHANKPIT_TICKET_SECRET");
+    if (!env || !env[0]) {
+        printf("WARNING: SHANKPIT_TICKET_SECRET not set — all connect attempts will be rejected (fail closed, not fail open)\n");
+        return;
+    }
+    size_t len = strlen(env);
+    if (len > sizeof(ticket_secret)) len = sizeof(ticket_secret);
+    memcpy(ticket_secret, env, len);
+    ticket_secret_len = (int)len;
+    printf("SHANKPIT_TICKET_SECRET loaded (%d bytes)\n", ticket_secret_len);
 }
 
 static int recorder_pick_target() {
@@ -353,15 +430,30 @@ void process_user_cmd(int client_id, UserCmd *cmd) {
 void server_handle_packet(struct sockaddr_in *sender, char *buffer, int size) {
     if (size < (int)sizeof(NetHeader)) return;
     NetHeader *head = (NetHeader*)buffer;
-    int client_id = -1;
-
-    if (head->type == PACKET_CONNECT || head->type == PACKET_USERCMD || head->type == PACKET_DISCONNECT) {
-        client_id = ensure_slot_for_sender(sender);
-    }
-    if (client_id == -1) return;
 
     if (head->type == PACKET_CONNECT) {
+        // Verify the connect ticket BEFORE allocating any slot — an
+        // invalid/missing/expired ticket (or an unconfigured secret, which
+        // fails closed) is silently dropped: no slot consumed, no Welcome
+        // sent. See EMILY/BACKLOG.md S156-02.
+        unsigned char player_id[16];
+        if (!verify_connect_ticket(buffer, size, player_id)) {
+            return;
+        }
+        // One seat per identity (VS2 hard constraint).
+        int existing = find_slot_by_player_id(player_id);
+        if (existing != -1) {
+            printf("CONNECT rejected: player_id already connected in slot=%d\n", existing);
+            return;
+        }
+
+        int client_id = ensure_slot_for_sender(sender);
+        if (client_id == -1) return;
+
         PlayerState *p = &local_state.players[client_id];
+        memcpy(p->player_id, player_id, 16);
+        p->has_player_id = 1;
+
         client_last_seq[client_id] = 0;
         p->in_fwd = 0.0f;
         p->in_strafe = 0.0f;
@@ -374,9 +466,24 @@ void server_handle_packet(struct sockaddr_in *sender, char *buffer, int size) {
         p->portal_cooldown_until_ms = 0;
         p->vehicle_cooldown = 0;
         send_welcome(sender, client_id);
+        return;
     }
 
-    if (client_id != -1 && head->type == PACKET_DISCONNECT) {
+    int client_id = -1;
+    if (head->type == PACKET_USERCMD || head->type == PACKET_DISCONNECT) {
+        // Look up an existing slot only — never auto-create one here. A slot
+        // is only allocated by the verified PACKET_CONNECT path above; if we
+        // called ensure_slot_for_sender (which allocates+welcomes unknown
+        // senders) here too, any client could skip CONNECT entirely, send a
+        // bare USERCMD, and get silently welcomed with no ticket at all —
+        // a total bypass of S156-02 ticket verification. Caught live via
+        // emily-bot -bad-ticket/-no-ticket both incorrectly reporting
+        // "welcomed" during S156-02 testing.
+        client_id = find_slot_by_addr(sender);
+    }
+    if (client_id == -1) return;
+
+    if (head->type == PACKET_DISCONNECT) {
         free_slot(client_id);
         return;
     }
@@ -476,6 +583,7 @@ int main(int argc, char *argv[]) {
     }
 
     server_net_init();
+    load_ticket_secret();
     int mode = parse_server_mode(argc, argv);
     int match_minutes = parse_match_minutes(argc, argv);
     local_init_match(1, mode);

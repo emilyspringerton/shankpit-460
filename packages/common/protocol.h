@@ -156,6 +156,8 @@ typedef struct {
     unsigned int stun_immune_until_ms;
     float run_phase;
     float run_weight;
+    unsigned char player_id[16];  // raw UUID from a verified connect ticket; zero = unauthenticated/unset (S156-02)
+    int has_player_id;
 } PlayerState;
 
 typedef struct {

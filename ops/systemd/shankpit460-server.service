@@ -11,6 +11,11 @@
 # game server. Raw UDP on :6969 (server-authoritative), no HTTP endpoint —
 # see EMILY BACKLOG SECTION 154 for the statuspage extension needed to
 # monitor a UDP-only service (the existing checker is HTTP-only).
+#
+# S156-02 (connect ticket auth): EnvironmentFile provides SHANKPIT_TICKET_SECRET
+# from ~/.config/shankpit460/env — must match the value IDUNA signs tickets
+# with (~/.config/iduna/env, same var name). Unset means the server fails
+# closed (rejects every connect), not open.
 
 [Unit]
 Description=SHANKPIT-460 game server (UDP :6969)
@@ -19,6 +24,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/fatbaby/shankpit-460
+EnvironmentFile=-%h/.config/shankpit460/env
 ExecStart=/home/fatbaby/shankpit-460/bin/shank_server
 Restart=on-failure
 RestartSec=10s
