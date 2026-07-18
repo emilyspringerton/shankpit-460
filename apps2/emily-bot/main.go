@@ -57,7 +57,14 @@ const (
 
 	btnAttack = 2
 
-	wpnMagnum = 1
+	wpnKnife   = 0
+	wpnMagnum  = 1
+	wpnAR      = 2
+	wpnShotgun = 3
+	wpnSniper  = 4
+	wpnKatana  = 5
+
+	weaponCycleInterval = 5 * time.Second // exercise weapon variety over a run, not just Magnum
 
 	netHeaderSize = 12 // type@0 client_id@1 sequence@2(u16) timestamp@4(u32) entity_count@8 scene_id@9 [2 pad]
 	userCmdSize   = 36 // sequence@0(u32) timestamp@4(u32) msec@8(u16)[2 pad] fwd@12 str@16 yaw@20 pitch@24 buttons@28 weapon_idx@32
@@ -90,8 +97,16 @@ type botStats struct {
 	sawOtherPlayer atomic.Bool // any peer ID != our own ever appeared in a snapshot
 	damageTaken    atomic.Bool // our own health in a snapshot dropped from a previous snapshot
 	damageDealt    atomic.Bool // any peer's hit_feedback was nonzero while we were aiming near them
+	deaths         atomic.Uint64 // our own state transitioned ALIVE->DEAD
+	respawns       atomic.Uint64 // our own state transitioned DEAD->ALIVE
+	weaponsSeen    uint32        // bitmask of current_weapon values observed on our own record; single-writer (receiveLoop only), read after wg.Wait()
 	lastErr        atomic.Value
 }
+
+const (
+	stateAlive = 0
+	stateDead  = 1
+)
 
 func main() {
 	host := flag.String("host", "127.0.0.1", "game server host")
@@ -100,6 +115,7 @@ func main() {
 	duration := flag.Duration("duration", 30*time.Second, "how long to run before reporting results")
 	verbose := flag.Bool("v", false, "verbose per-packet logging")
 	report := flag.Bool("report", false, "post a summary to Emily Prime via `emily observe` when done")
+	weapon := flag.Int("weapon", -1, "lock to one weapon (0=knife 1=magnum 2=ar 3=shotgun 4=sniper 5=katana); -1 cycles through all six")
 	flag.Parse()
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
@@ -114,7 +130,7 @@ func main() {
 		wg.Add(1)
 		go func(s *botStats) {
 			defer wg.Done()
-			runBot(*host, *port, *duration, *verbose, s)
+			runBot(*host, *port, *duration, *verbose, *weapon, s)
 		}(s)
 		time.Sleep(20 * time.Millisecond) // stagger connects
 	}
@@ -129,7 +145,7 @@ func main() {
 	}
 }
 
-func runBot(host string, port int, duration time.Duration, verbose bool, s *botStats) {
+func runBot(host string, port int, duration time.Duration, verbose bool, lockWeapon int, s *botStats) {
 	udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		s.lastErr.Store(fmt.Sprintf("resolve addr: %v", err))
@@ -146,6 +162,7 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 	var mu sync.Mutex
 	var myID uint8
 	var myLastHealth uint8 = 255 // sentinel: "unknown yet"
+	var myLastState uint8 = 255  // sentinel: "unknown yet"
 	var myX, myZ float32
 	var haveServerPos bool // becomes true once our own snapshot entry has been seen at least once
 
@@ -191,10 +208,27 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 					y := math.Float32frombits(binary.LittleEndian.Uint32(buf[off+12:]))
 					z := math.Float32frombits(binary.LittleEndian.Uint32(buf[off+16:]))
 					yaw := math.Float32frombits(binary.LittleEndian.Uint32(buf[off+20:]))
+					weapon := buf[off+28]
+					state := buf[off+29]
 					health := buf[off+30]
 					hitFeedback := buf[off+42]
 
 					if id == myID {
+						s.weaponsSeen |= 1 << uint32(weapon)
+						if myLastState != 255 {
+							if myLastState == stateAlive && state == stateDead {
+								s.deaths.Add(1)
+								if verbose {
+									fmt.Printf("[emily-bot#%d] died\n", s.idx)
+								}
+							} else if myLastState == stateDead && state == stateAlive {
+								s.respawns.Add(1)
+								if verbose {
+									fmt.Printf("[emily-bot#%d] respawned\n", s.idx)
+								}
+							}
+						}
+						myLastState = state
 						if myLastHealth != 255 && health < myLastHealth {
 							s.damageTaken.Store(true)
 							if verbose {
@@ -240,6 +274,7 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 	// Deterministic per-bot patrol pattern, phase-offset by index.
 	phase := float64(s.idx) * 0.9
 	seq := uint32(0)
+	startTime := time.Now() // reference for elapsed-time math below; time.Time{} (year 1) overflows time.Duration's ~292-year range against a 2026 "now" — caught live, see EMILY/BACKLOG.md SECTION 155
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 	deadline := time.After(duration)
@@ -258,7 +293,8 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 			firing = true
 		case now := <-ticker.C:
 			seq++
-			t := now.Sub(time.Time{}).Seconds() + phase
+			elapsed := now.Sub(startTime)
+			t := elapsed.Seconds() + phase
 
 			var fwd, str, yaw float32
 			mu.Lock()
@@ -290,6 +326,14 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 				str = float32(math.Sin(t * 0.3))
 			}
 
+			var weaponIdx int32
+			if lockWeapon >= 0 {
+				weaponIdx = int32(lockWeapon)
+			} else {
+				weapons := [...]int32{wpnKnife, wpnMagnum, wpnAR, wpnShotgun, wpnSniper, wpnKatana}
+				weaponIdx = weapons[int(elapsed/weaponCycleInterval)%len(weapons)]
+			}
+
 			cmd := struct {
 				seq, ts       uint32
 				msec          uint16
@@ -299,7 +343,7 @@ func runBot(host string, port int, duration time.Duration, verbose bool, s *botS
 				weaponIdx     int32
 			}{
 				seq: seq, ts: uint32(now.UnixMilli()), msec: uint16(tickInterval.Milliseconds()),
-				fwd: fwd, str: str, yaw: yaw, pitch: 0, weaponIdx: wpnMagnum,
+				fwd: fwd, str: str, yaw: yaw, pitch: 0, weaponIdx: weaponIdx,
 			}
 			if firing && nearest != nil {
 				cmd.buttons |= btnAttack
@@ -366,9 +410,28 @@ func sendUserCmd(conn *net.UDPConn, seq, ts uint32, msec uint16, fwd, str, yaw, 
 // bots, at least one bot must have observed at least one other bot in a
 // snapshot for the run to PASS — that's the actual multiplayer-sync check,
 // not just "did anyone connect."
+var weaponNames = [...]string{"knife", "magnum", "ar", "shotgun", "sniper", "katana"}
+
+func weaponsSeenNames(mask uint32) string {
+	if mask == 0 {
+		return "-"
+	}
+	out := ""
+	for i, name := range weaponNames {
+		if mask&(1<<uint32(i)) != 0 {
+			if out != "" {
+				out += ","
+			}
+			out += name
+		}
+	}
+	return out
+}
+
 func summarize(stats []*botStats, addr string, duration time.Duration, requirePeerVisibility bool) bool {
 	fmt.Printf("\n[emily-bot] run complete — %d bot(s) vs %s for %s\n", len(stats), addr, duration)
-	fmt.Printf("%-6s %-9s %-10s %-10s %-8s %-9s %-9s %s\n", "bot", "welcomed", "cmds_sent", "snapshots", "saw_peer", "dmg_taken", "dmg_dealt", "error")
+	fmt.Printf("%-6s %-9s %-10s %-10s %-8s %-9s %-9s %-7s %-9s %-24s %s\n",
+		"bot", "welcomed", "cmds_sent", "snapshots", "saw_peer", "dmg_taken", "dmg_dealt", "deaths", "respawns", "weapons_used", "error")
 	pass := true
 	anyPeerSeen := false
 	for _, s := range stats {
@@ -381,8 +444,9 @@ func summarize(stats []*botStats, addr string, duration time.Duration, requirePe
 		if !welcomed || errStr != "" {
 			pass = false
 		}
-		fmt.Printf("%-6d %-9v %-10d %-10d %-8v %-9v %-9v %s\n",
-			s.idx, welcomed, s.cmdsSent.Load(), s.snapshots.Load(), sawPeer, s.damageTaken.Load(), s.damageDealt.Load(), errStr)
+		fmt.Printf("%-6d %-9v %-10d %-10d %-8v %-9v %-9v %-7d %-9d %-24s %s\n",
+			s.idx, welcomed, s.cmdsSent.Load(), s.snapshots.Load(), sawPeer, s.damageTaken.Load(), s.damageDealt.Load(),
+			s.deaths.Load(), s.respawns.Load(), weaponsSeenNames(s.weaponsSeen), errStr)
 	}
 	if requirePeerVisibility && !anyPeerSeen {
 		pass = false
