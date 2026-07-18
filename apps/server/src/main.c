@@ -29,6 +29,11 @@ int sock = -1;
 struct sockaddr_in bind_addr;
 unsigned int client_last_seq[MAX_CLIENTS];
 
+// Server ticks at 16ms (see the usleep(16000) in main's loop) -> 62.5
+// ticks/sec -> exactly 3750 ticks/minute.
+#define TICKS_PER_MINUTE 3750
+#define DEFAULT_MATCH_MINUTES 10
+
 typedef struct {
     int active;
     int welcomed;
@@ -278,6 +283,44 @@ int parse_server_mode(int argc, char **argv) {
     return mode;
 }
 
+// parse_match_minutes reads --match-minutes N (default DEFAULT_MATCH_MINUTES).
+// A value <= 0 disables the round boundary entirely (match never completes) —
+// useful for the emily-bot E2E harness to isolate other behavior from round
+// resets, or for a "practice server" that never scores.
+int parse_match_minutes(int argc, char **argv) {
+    int minutes = DEFAULT_MATCH_MINUTES;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--match-minutes") == 0 && i + 1 < argc) {
+            minutes = atoi(argv[i + 1]);
+            i++;
+        }
+    }
+    return minutes;
+}
+
+// complete_match logs final standings and starts a new round: kills/deaths
+// reset to zero for every active player, everyone respawns fresh (matching
+// the "closed, non-redeemable economy" doctrine — nothing carries between
+// rounds, see shankpit-460/docs2/NORTHSTAR.md §1), and the round timer
+// restarts. This is the first real match/round boundary this server has had
+// (EMILY/BACKLOG.md S156-01) — previously local_init_match ran once at
+// startup and nothing ever closed a round.
+void complete_match(int match_minutes) {
+    local_state.match_number++;
+    printf("MATCH_COMPLETE number=%d\n", local_state.match_number);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        PlayerState *p = &local_state.players[i];
+        if (!p->active) continue;
+        printf("  standing client=%d kills=%d deaths=%d\n", i, p->kills, p->deaths);
+        p->kills = 0;
+        p->deaths = 0;
+        if (i > 0) {
+            phys_respawn(p, get_server_time());
+        }
+    }
+    local_state.match_ticks_remaining = match_minutes > 0 ? match_minutes * TICKS_PER_MINUTE : 0;
+}
+
 void server_net_init() {
     setbuf(stdout, NULL);
     #ifdef _WIN32
@@ -434,11 +477,19 @@ int main(int argc, char *argv[]) {
 
     server_net_init();
     int mode = parse_server_mode(argc, argv);
+    int match_minutes = parse_match_minutes(argc, argv);
     local_init_match(1, mode);
     local_state.players[0].active = 0;
     local_state.players[0].health = 0;
     local_state.players[0].state = STATE_DEAD;
+    local_state.match_ticks_remaining = match_minutes > 0 ? match_minutes * TICKS_PER_MINUTE : 0;
+    local_state.match_number = 1;
     printf("SERVER MODE: %s\n", mode == MODE_TDM ? "TEAM DEATHMATCH" : "DEATHMATCH");
+    if (match_minutes > 0) {
+        printf("MATCH_LENGTH minutes=%d\n", match_minutes);
+    } else {
+        printf("MATCH_LENGTH disabled (--match-minutes <= 0) — round boundary off\n");
+    }
 
     int running = 1;
     unsigned int tick = 0;
@@ -540,6 +591,13 @@ int main(int argc, char *argv[]) {
                     slots[i].cmd_seen,
                     local_state.players[i].active,
                     local_state.client_meta[i].last_heard_ms);
+            }
+        }
+
+        if (local_state.match_ticks_remaining > 0) {
+            local_state.match_ticks_remaining--;
+            if (local_state.match_ticks_remaining == 0) {
+                complete_match(match_minutes);
             }
         }
 

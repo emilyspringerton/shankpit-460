@@ -177,6 +177,8 @@ typedef struct {
     int transition_timer;
     struct sockaddr_in clients[MAX_CLIENTS];
     ClientMeta client_meta[MAX_CLIENTS];
+    int match_ticks_remaining; // server.c/main.c only: round-boundary timer, see S156-01
+    int match_number;          // increments each time match_ticks_remaining hits 0
 } ServerState;
 
 #endif
