@@ -1,0 +1,30 @@
+# SHANKPIT-460 game server — user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/shankpit460-server.service ~/.config/systemd/user/
+#   make server   (from the repo root — builds bin/shank_server)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now shankpit460-server.service
+#
+# Added 2026-07-18 — first-ever supervised run of the shankpit-460 fork's
+# game server. Raw UDP on :6969 (server-authoritative), no HTTP endpoint —
+# see EMILY BACKLOG SECTION 154 for the statuspage extension needed to
+# monitor a UDP-only service (the existing checker is HTTP-only).
+
+[Unit]
+Description=SHANKPIT-460 game server (UDP :6969)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/shankpit-460
+ExecStart=/home/fatbaby/shankpit-460/bin/shank_server
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/home/fatbaby/shankpit-460/var/logs/server.log
+StandardError=append:/home/fatbaby/shankpit-460/var/logs/server.log
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

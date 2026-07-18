@@ -1,5 +1,6 @@
 # Ignore build artifacts
 bin/
+var/
 obj/
 release_server/
 release_client/
