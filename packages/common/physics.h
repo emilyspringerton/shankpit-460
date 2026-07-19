@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "protocol.h"
+#include "map_loader.h" // defines Box + external map file loading (v0 format)
 
 // --- TUNING ---
 #define GRAVITY_FLOAT 0.025f 
@@ -54,7 +55,6 @@ void evolve_bot(PlayerState *loser, PlayerState *winner);
 PlayerState* get_best_bot();
 void phys_respawn(PlayerState *p, unsigned int now);
 
-typedef struct { float x, y, z, w, h, d; } Box;
 typedef struct { float x, y; } Vec2;
 
 // --- SCENES ---
@@ -222,6 +222,11 @@ static inline void phys_set_scene(int scene_id) {
         init_voxworld_city_geo();
         map_geo = map_geo_voxworld;
         map_count = map_geo_voxworld_count;
+    } else if (map_loader_active) {
+        // A file-loaded map replaces the hardcoded stadium geometry (the
+        // deathmatch arena scene). See packages/common/map_loader.h.
+        map_geo = map_geo_loaded;
+        map_count = map_geo_loaded_count;
     } else {
         map_geo = map_geo_stadium;
         map_count = (int)(sizeof(map_geo_stadium) / sizeof(Box));
@@ -243,6 +248,12 @@ static inline void scene_spawn_point(int scene_id, int slot, float *out_x, float
         *out_x = offsets[idx];
         *out_y = 6.0f;
         *out_z = 0.0f;
+        return;
+    }
+    if (map_loader_active && map_spawns_loaded_count > 0) {
+        // File-loaded map (stadium scene): use its authored spawn points.
+        MapSpawnPoint sp = map_spawns_loaded[slot % map_spawns_loaded_count];
+        *out_x = sp.x; *out_y = sp.y; *out_z = sp.z;
         return;
     }
     if (slot % 2 == 0) {

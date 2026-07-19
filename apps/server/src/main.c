@@ -120,12 +120,22 @@ static int find_slot_by_addr(const struct sockaddr_in *addr) {
     return -1;
 }
 
+// $SHANKPIT_CONNECT_SCENE=stadium drops new connections straight into the
+// arena scene (the file-loaded map) instead of the garage hub — used by map
+// playtests and headless bot-eval runs, where nothing presses USE at a
+// portal. Default is unchanged: garage.
+static int connect_scene(void) {
+    const char *s = getenv("SHANKPIT_CONNECT_SCENE");
+    if (s && strcmp(s, "stadium") == 0) return SCENE_STADIUM;
+    return SCENE_GARAGE_OSAKA;
+}
+
 static int alloc_slot(const struct sockaddr_in *addr) {
     for (int i = 1; i < MAX_CLIENTS; i++) {
         if (!slots[i].active) {
             memset(&local_state.players[i], 0, sizeof(PlayerState));
             local_state.players[i].id = i;
-            local_state.players[i].scene_id = SCENE_GARAGE_OSAKA;
+            local_state.players[i].scene_id = connect_scene();
             local_state.players[i].active = 0;
             phys_respawn(&local_state.players[i], get_server_time());
             local_state.players[i].yaw = 0.0f;
@@ -531,14 +541,19 @@ void server_net_init() {
     #else
     int flags = fcntl(sock, F_GETFL, 0); fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     #endif
+    // $SHANKPIT_PORT overrides the default so a second instance (map
+    // playtests, bot-eval runs) can coexist with the deployed server.
+    int port = 6969;
+    const char *port_env = getenv("SHANKPIT_PORT");
+    if (port_env && atoi(port_env) > 0) port = atoi(port_env);
     bind_addr.sin_family = AF_INET;
-    bind_addr.sin_port = htons(6969);
+    bind_addr.sin_port = htons((unsigned short)port);
     bind_addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(sock, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) {
-        printf("FAILED TO BIND PORT 6969\n");
+        printf("FAILED TO BIND PORT %d\n", port);
         exit(1);
     } else {
-        printf("SERVER LISTENING ON PORT 6969\nWaiting...\n");
+        printf("SERVER LISTENING ON PORT %d\nWaiting...\n", port);
     }
 }
 
@@ -707,6 +722,7 @@ int main(int argc, char *argv[]) {
     server_net_init();
     load_ticket_secret();
     load_iduna_agent_config();
+    map_load_default(); // $SHANKPIT_MAP or maps/v0_shankpit.map; falls back to built-in stadium
     int mode = parse_server_mode(argc, argv);
     int match_minutes = parse_match_minutes(argc, argv);
     local_init_match(1, mode);

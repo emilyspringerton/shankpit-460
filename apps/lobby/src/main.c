@@ -1917,7 +1917,8 @@ int main(int argc, char* argv[]) {
     proctex_make_glitch_marks_rgba(&g_vehicle_glitch_tex, 64, 64, g_vehicle_style.seed ^ 0xA53u);
     proctex_upload_to_gl(&g_vehicle_glitch_tex);
     net_init();
-    
+    map_load_default(); // must match the server's map or prediction/rendering will disagree
+
     local_init_match(1, 0);
     lobby_init_labels();
     ui_bridge_init("127.0.0.1", 17777);
