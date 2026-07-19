@@ -2,10 +2,10 @@ name: ShankPit Factory
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
     tags: [ "v*" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 concurrency:
@@ -59,10 +59,11 @@ jobs:
             libncurses-dev \
             wget
 
-          rm -rf sdl2_mingw SDL2-2.28.5 SDL2-devel-2.28.5-mingw.tar.gz || true
-          wget -q https://www.libsdl.org/release/SDL2-devel-2.28.5-mingw.tar.gz
-          tar xzf SDL2-devel-2.28.5-mingw.tar.gz
-          mv SDL2-2.28.5/x86_64-w64-mingw32 ./sdl2_mingw
+          rm -rf sdl2_mingw SDL2-2.30.10 SDL2-devel-2.30.10-mingw.tar.gz || true
+          wget -q --retry-connrefused --tries=3 \
+            https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz
+          tar xzf SDL2-devel-2.30.10-mingw.tar.gz
+          mv SDL2-2.30.10/x86_64-w64-mingw32 ./sdl2_mingw
 
       - name: Build Windows Client
         shell: bash
@@ -129,7 +130,7 @@ jobs:
             ! -path "*/artifacts/*" \
             ! -path "*/build/*" \
             ! -path "*/sdl2_mingw/*" \
-            ! -path "*/SDL2-2.28.5/*" \
+            ! -path "*/SDL2-2.30.10/*" \
             | sort)
 
           for file in $FILES; do

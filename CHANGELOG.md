@@ -10,3 +10,12 @@
   stripped-down, low-system-spec competitive esports FPS, targeting a large global audience.
   Full history preserved up to the fork point; diverges independently from here forward. Not yet
   scoped into a design/stripping plan — that's the next real step (NORTHSTAR.md).
+
+## 2026-07-19
+- fix(ci): workflows triggered on branches: ["master"] but this fork's actual default branch is
+  "main" (forked from SHANKPIT, which really is master; nobody updated the copied workflows) — CI
+  has never fired on normal push/PR activity, only workflow_dispatch/tags. Fixed in both
+  release.yml and tests.yml.
+- fix(ci): SDL2 dependency was pinned to 2.28.5 via a bare libsdl.org direct download (no retry) —
+  brought to parity with the parent SHANKPIT repo's already-fixed 2.30.10 via GitHub releases with
+  --retry-connrefused --tries=3.
