@@ -20,6 +20,36 @@
   brought to parity with the parent SHANKPIT repo's already-fixed 2.30.10 via GitHub releases with
   --retry-connrefused --tries=3.
 
+## 2026-07-19 (3)
+- feat(map): external map file format + v0 launch deathmatch map — geometry moves out of
+  hardcoded C for the first time. New packages/common/map_loader.h (plain-text format: box/
+  spawn/poi lines, '#' comments; the exact shape of the live Box primitive, nothing richer) is
+  loaded at startup by both the live server (apps/server/src/main.c) and the live client
+  (apps/lobby/src/main.c), served under SCENE_STADIUM with soft fallback to the old hardcoded
+  stadium if the file is missing/malformed. $SHANKPIT_MAP selects the file. maps/v0_shankpit.map
+  is the first map authored in the format, per founder brief: a base at each end (future CTF
+  flag stands — geometry stays CTF-plausible, ships DM-only), a tiered mid base with the
+  rocket-launcher spawn poi on its crown (marker only; no pickup system exists yet — flagged),
+  intentional asymmetry, rocks on the flanks and ends. release.yml now ships maps/ in both the
+  client and world bundles (a client/server pair must load the same file or their geometry
+  disagrees). Verified two ways: a 17-check harness against the built physics (load, envelope,
+  spawns hit both bases, mid-crown climbable tier-by-tier under real jump constants, projectile
+  collision, perimeter push-back, bad-file fallback) and a live playtest — 6 emily-bot clients
+  connected, fought, died, respawned directly on the new map.
+- ops(server): $SHANKPIT_PORT (bind port override) and $SHANKPIT_CONNECT_SCENE=stadium (drop
+  new connections straight onto the arena map instead of the garage hub). Defaults unchanged.
+  These are the first two ops primitives of the map bot-eval loop, and what made the live
+  playtest possible next to the running production server.
+- docs: docs2/maps-report.md — Track B report (report only, no code): LLM map generation against
+  the new format, editor strategy (text-first, then in-game overlay; explicitly not a standalone
+  tool), git-as-map-versioning argued, and the fuzz/bot-eval loop framed as a NORN instantiation
+  (HQ-SPEC-PRIME-101) with a concrete oracle metric (engagement-dispersion entropy x
+  participation) and a prime_ack gate tier argued per the spec's own framework. Two findings
+  flagged for the founder: hitscan weapons never consult map geometry (bullets pass through
+  walls — only projectiles collide; real competitive-integrity gap), and the "Super Rumble, more
+  turbo" physics ask recorded as a concrete +10-15% MAX_SPEED delta proposal on current
+  constants, deliberately not applied without sign-off.
+
 ## 2026-07-19 (2)
 - ops: shankpit460-emily-bot.service — keeps one emily-bot permanently queued into the live game
   server so there's always an opponent present. ops/systemd/shankpit460-emily-bot.service; ticket
