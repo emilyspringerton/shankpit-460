@@ -128,6 +128,37 @@ archive") and onto endpoints that already exist:
 - Where does the stats page actually live (okemily.com path vs. new `shankpit.` subdomain)? Ties
   to FATES (`HQ-SPEC-INFRA-105`) naming doctrine, not a call to make in isolation.
 
+## 7. Spatial audio (backlog, not yet started — founder direction 2026-07-19)
+
+R6 Siege-style spatial sound is a backlog item, not scoped for the current build order. **This is
+a port, not a fresh build** — SHANKPIT (the parent repo, `packages/audio/audio.c`/`audio.h`)
+already has a working spatial audio engine that shankpit-460 simply hasn't pulled in yet:
+
+- Raw SDL2 audio (`SDL_OpenAudioDevice` + a mix callback), not SDL_mixer.
+- Every sound is synthesized at runtime as a PCM wavetable — no asset files at all. Weapon sounds
+  map to MIDI drum/bass archetypes (knife/katana = metallic hi-hat, magnum = 808 kick, AR = tight
+  hi-hat burst, shotgun = layered kick+noise, sniper = sub-bass boom); footsteps cycle a C-major
+  pentatonic scale. This already **is** the "MIDI tones as placeholders" the founder asked for —
+  don't re-derive it from scratch.
+- Spatial panning (listener position + yaw → L/R gain via `sin(rel_angle)`) and distance
+  attenuation (soft rolloff, full volume inside 80 units) are already implemented.
+
+**What's actually missing, and the real work here:** `audio.c` has no interface/abstraction at
+all — `audio_play_weapon`/`audio_play_footstep` are free functions tightly coupled to the
+synthesis backend. There's no seam to later swap in real recorded assets (WAV/OGG via SDL_mixer
+or similar) without touching every call site. Before porting into shankpit-460, wrap this behind a
+proper interface (e.g. a `SoundEngine` vtable/struct-of-function-pointers: `play_weapon`,
+`play_footstep`, `play_ambient`, `shutdown`) with the existing synth engine as the first, default
+implementation — so a future "real sound pack" backend is a second implementation behind the same
+interface, not a rewrite.
+
+**Back-port direction, per founder instruction:** build/refine the interface in shankpit-460 first
+(esports fork = the active development surface right now), then merge the interface + any
+esports-driven tuning (e.g. footstep audio is core competitive intel in R6 Siege — may need
+tighter distance/occlusion fidelity than SHANKPIT's ambiance-oriented original) back into
+SHANKPIT's `packages/audio/`. Not started — no code written yet, this section is the design
+record so it doesn't get improvised later.
+
 ## Build order
 
 1. ✅ Verify match/round-boundary reality server-side (open question above) before anything else. — S156-01, done.

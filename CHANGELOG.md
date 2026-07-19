@@ -19,3 +19,12 @@
 - fix(ci): SDL2 dependency was pinned to 2.28.5 via a bare libsdl.org direct download (no retry) —
   brought to parity with the parent SHANKPIT repo's already-fixed 2.30.10 via GitHub releases with
   --retry-connrefused --tries=3.
+
+## 2026-07-19 (2)
+- ops: shankpit460-emily-bot.service — keeps one emily-bot permanently queued into the live game
+  server so there's always an opponent present. ops/systemd/shankpit460-emily-bot.service; ticket
+  secret via EnvironmentFile, not a CLI flag (avoids leaking it into ps/systemctl status output).
+- docs(northstar): section 7 — spatial audio backlog. SHANKPIT (parent) already has a working
+  SDL2 spatial audio engine (packages/audio/) with MIDI-style synthesized placeholder tones and
+  yaw/distance panning — this is a port, not a fresh build. Real missing piece: no
+  interface/abstraction to later swap in real sound assets. Not started, design record only.

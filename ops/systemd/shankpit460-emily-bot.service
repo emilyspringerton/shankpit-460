@@ -1,0 +1,44 @@
+# SHANKPIT-460 fill bot — user-level systemd unit (no sudo required)
+#
+# Keeps one emily-bot permanently queued into the live shankpit460 game
+# server (127.0.0.1:6969) so there's always an opponent present, until
+# real players are on. `-duration` is set absurdly long (10 years) since
+# emily-bot is fundamentally a bounded-duration test harness, not a
+# persistent daemon by design; Restart=always is the real safety net if
+# the server restarts, the bot's connection drops, or it ever does hit
+# that duration cap.
+#
+# Deploy:
+#   cp ops/systemd/shankpit460-emily-bot.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now shankpit460-emily-bot.service
+#
+# Ticket secret comes from EnvironmentFile ($SHANKPIT_TICKET_SECRET) rather
+# than a CLI flag — emily-bot's -ticket-secret flag defaults to that env var
+# already, and passing secrets as flags leaks them into `ps`/`systemctl
+# status` output in plaintext.
+#
+# Added 2026-07-19.
+
+[Unit]
+Description=SHANKPIT-460 emily-bot fill player (keeps a bot queued for opponents)
+After=network-online.target shankpit460-server.service
+Wants=shankpit460-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/shankpit-460
+EnvironmentFile=/home/fatbaby/.config/iduna/env
+ExecStart=/home/fatbaby/shankpit-460/bin/emily-bot \
+    -host 127.0.0.1 \
+    -port 6969 \
+    -bots 1 \
+    -duration 87600h
+Restart=always
+RestartSec=10s
+StandardOutput=append:/home/fatbaby/shankpit-460/var/logs/emily-bot-daemon.log
+StandardError=append:/home/fatbaby/shankpit-460/var/logs/emily-bot-daemon.log
+MemoryMax=128M
+
+[Install]
+WantedBy=default.target
