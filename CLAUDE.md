@@ -38,3 +38,7 @@ NORTHSTAR.md for this fork before cutting code, per the Emily Way's "spec before
 
 - `SHANKPIT` — the parent repo this was forked from; diverges from here forward
 - `EMILY` — RSI loop / backlog coordination for cross-repo work
+
+## Commit Protocol (standing instruction)
+
+Always commit and push completed work immediately — don't wait to be asked. This is the default for every repo in this monorepo.
