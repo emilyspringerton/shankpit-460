@@ -1,5 +1,24 @@
 # SHANKPIT-460 Changelog
 
+## 2026-07-24
+
+- ops: emily-bot fill pool 1 -> 6 bots + new firewall script (S170-83, "operational parity" with
+  REDGARDEN's Knights of the Void). Founder: "shankpit460 lobby and matchmaking pariuty to
+  REDGARDEN knights of the void" → clarified as "same bot and pools setup"/"same matchmaking."
+  Investigated first: shankpit-460's matchmaking (IDUNA queue + one persistent server) is an
+  intentional, documented, different architecture from REDGARDEN's per-match ephemeral servers
+  (`docs2/NORTHSTAR.md` §3), not an unfinished port -- flagged this rather than regressing it, and
+  the founder confirmed operational-parity-only scope. `ops/systemd/shankpit460-emily-bot.service`
+  bumped `-bots 1` → `-bots 6` (FFA deathmatch, not team-based, and this repo's own low-spec
+  mandate argues against matching REDGARDEN's MOBA-scale 19). Verified live: server log shows all
+  6 bots welcomed and fighting (`Clients: 6`, real hit events). New
+  `sudo-queue/10-shankpit460-firewall.sh` opens 6969/udp -- same class of gap that caused
+  REDGARDEN's S170-72/S170-85 (localhost bots bypass ufw entirely, masking a real external-connect
+  blocker), checked proactively before it became a live incident here. Also worth noting the other
+  direction: this repo's ticket-secret handling (`EnvironmentFile=`) is already better than what
+  shipped for REDGARDEN tonight (`Environment=` plaintext) -- flagged in EMILY/BACKLOG.md S170-83
+  as something to carry back the other way later, not copy from REDGARDEN.
+
 ## 2026-07-18
 - feat(server): report match results to IDUNA on completion (S156-04) -- complete_match() now POSTs kills/deaths per authenticated client to IDUNA's existing POST /api/v1/players/{id}/session before the per-round reset, feeding the leaderboard/profile endpoints already consumed by `emily shankpit leaderboard`. Server authenticates as the new SHANKPIT460-SERVER M2M agent via IDUNA's existing POST /api/v1/auth/agent, using a new minimal self-contained HTTP/1.1 client (packages/common/http_client.h, no TLS, no external library) plus a tiny JSON field scanner. Deliberately best-effort, not fail-closed -- IDUNA being unreachable must never block the round timer. Caught live: first draft looked for a "token" field in the auth response, but IDUNA actually returns "access_token" -- would have silently no-op'd every match. End-to-end verified: direct-curl agent auth+POST confirmed via IDUNA's leaderboard, and a live match against emily-bot's unregistered player_ids correctly logged a graceful 404-and-continue per player without blocking match completion. Deployed to production. shankpit-460 8587f25.
 - feat(server): IDUNA connect-ticket auth on PACKET_CONNECT (S156-02) -- server now requires a valid HMAC-SHA256 ticket (minted by IDUNA's new POST /api/v1/shankpit/ticket) before allocating a slot; fails closed if SHANKPIT_TICKET_SECRET is unset or the MAC/expiry don't check out. Also enforces one-seat-per-identity (VS2): a second concurrent connect for an already-connected player_id is rejected, not migrated. Self-contained HMAC-SHA256 (packages/common/hmac_sha256.h, no external crypto library), verified against RFC 4231 test vectors 1/2 and cross-checked against Go's crypto/hmac output. emily-bot gained matching ticket minting plus -bad-ticket/-no-ticket/-same-identity test modes. End-to-end testing surfaced and fixed a real auth bypass: PACKET_USERCMD used ensure_slot_for_sender, which auto-welcomes any unrecognized address regardless of ticket status -- a client could skip CONNECT entirely and get in free via USERCMD. Fixed by using the existing lookup-only find_slot_by_addr for USERCMD/DISCONNECT; only the verified CONNECT path may allocate a new slot. All four scenarios (valid, bad ticket, no ticket, duplicate identity) verified against an isolated instance before deploying to the production shankpit460-server systemd unit. shankpit-460 e78cc07.

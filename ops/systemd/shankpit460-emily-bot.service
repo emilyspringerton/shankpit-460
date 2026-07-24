@@ -1,12 +1,20 @@
-# SHANKPIT-460 fill bot — user-level systemd unit (no sudo required)
+# SHANKPIT-460 fill bots — user-level systemd unit (no sudo required)
 #
-# Keeps one emily-bot permanently queued into the live shankpit460 game
-# server (127.0.0.1:6969) so there's always an opponent present, until
-# real players are on. `-duration` is set absurdly long (10 years) since
-# emily-bot is fundamentally a bounded-duration test harness, not a
-# persistent daemon by design; Restart=always is the real safety net if
-# the server restarts, the bot's connection drops, or it ever does hit
-# that duration cap.
+# Keeps a small pool of emily-bots permanently queued into the live
+# shankpit460 game server (127.0.0.1:6969) so there's always real combat
+# happening, until real players are on. `-duration` is set absurdly long
+# (10 years) since emily-bot is fundamentally a bounded-duration test
+# harness, not a persistent daemon by design; Restart=always is the real
+# safety net if the server restarts, a bot's connection drops, or it ever
+# does hit that duration cap.
+#
+# Bot count (S170-83, "operational parity" with REDGARDEN's persistent bot
+# pool): bumped from 1 to 6. Free-for-all deathmatch, not team-based (see
+# docs2/NORTHSTAR.md), and this repo's whole mission is staying playable on
+# low-end hardware -- 6 gives a real firefight with multiple simultaneous
+# opponents without matching REDGARDEN's MOBA-scale 19, which would be both
+# unnecessary for FFA and heavier than this repo's own low-spec mandate
+# wants for a background fill population.
 #
 # Deploy:
 #   cp ops/systemd/shankpit460-emily-bot.service ~/.config/systemd/user/
@@ -18,10 +26,10 @@
 # already, and passing secrets as flags leaks them into `ps`/`systemctl
 # status` output in plaintext.
 #
-# Added 2026-07-19.
+# Added 2026-07-19. Bot count bumped 2026-07-24 (S170-83).
 
 [Unit]
-Description=SHANKPIT-460 emily-bot fill player (keeps a bot queued for opponents)
+Description=SHANKPIT-460 emily-bot fill players (keeps a bot pool queued for opponents)
 After=network-online.target shankpit460-server.service
 Wants=shankpit460-server.service
 
@@ -32,7 +40,7 @@ EnvironmentFile=/home/fatbaby/.config/iduna/env
 ExecStart=/home/fatbaby/shankpit-460/bin/emily-bot \
     -host 127.0.0.1 \
     -port 6969 \
-    -bots 1 \
+    -bots 6 \
     -duration 87600h
 Restart=always
 RestartSec=10s
