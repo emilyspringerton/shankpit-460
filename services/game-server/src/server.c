@@ -1,3 +1,10 @@
+/* NOT THE REAL SERVER (S155-02, EMILY/BACKLOG.md): this implementation is fully superseded by
+ * apps/server/src/main.c and is not built, run, or referenced by any script, Makefile, or
+ * systemd unit in this repo. It exists only as unremoved history from before the real server
+ * consolidated. Do not extend or wire this up without first checking apps/server/src/main.c --
+ * a real engineer/agent lost real time re-discovering this the hard way once already. This file
+ * is kept pending a deliberate NORTHSTAR scoping pass on what specifically gets cut vs. kept
+ * (see this repo's own CLAUDE.md), not because it's still in use. */
 #define _WIN32_WINNT 0x0600
 #include <stdio.h>
 #include <stdlib.h>

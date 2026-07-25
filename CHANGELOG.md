@@ -1,5 +1,16 @@
 # SHANKPIT-460 Changelog
 
+## 2026-07-25
+
+- docs: "NOT THE REAL SERVER" warning comments on the two dead server implementations
+  (S155-02, `EMILY/BACKLOG.md`). `services/game-server/src/server.c` and `apps2/server-go/
+  main.go` are both fully superseded by `apps/server/src/main.c` and confirmed unreferenced by
+  any script, Makefile, or systemd unit in this repo — dead history, not live code. Per the
+  backlog item's own framing ("don't delete unilaterally... at minimum add a loud comment until
+  then"), took the minimal safe option rather than deleting or folding into a full NORTHSTAR
+  scoping pass. No build/test impact — comment-only change, and neither file is part of `go.work`
+  or any Makefile target regardless.
+
 ## 2026-07-24
 
 - ops: emily-bot fill pool 1 -> 6 bots + new firewall script (S170-83, "operational parity" with
