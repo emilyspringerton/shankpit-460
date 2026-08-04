@@ -1476,7 +1476,15 @@ void net_connect() {
         mint_client_ticket(ticket);
         memcpy(buffer + sizeof(NetHeader), ticket, TICKET_TOTAL_LEN);
         sendto(sock, buffer, sizeof(NetHeader) + TICKET_TOTAL_LEN, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
-        printf("Connected to %s...\n", SERVER_HOST);
+        /* Real bug found live (2026-08-04, founder: "it says connected to okemily.com a bunch of
+           times in the console" while still stuck, unable to move): this used to print "Connected
+           to %s..." on a bare fire-and-forget sendto(), no ack involved -- since net_connect() is
+           also what the real CONNECT-retry loop calls every CLIENT_CONNECT_RETRY_MS for as long as
+           no WELCOME has landed, that message printed on every single retry, genuinely telling the
+           player the connection succeeded when the server may never have received anything at all.
+           The real success line is "JOINED SERVER AS CLIENT ID" below, printed only on an actual
+           WELCOME -- this one now says what actually, verifiably happened: a packet was sent. */
+        printf("CONNECT packet sent to %s (waiting for WELCOME)...\n", SERVER_HOST);
     } else {
         printf("Failed to resolve %s\n", SERVER_HOST);
     }
