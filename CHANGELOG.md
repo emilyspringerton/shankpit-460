@@ -1,5 +1,23 @@
 # SHANKPIT-460 Changelog
 
+## 2026-08-04 (5)
+
+- fix(lobby): retry the initial CONNECT itself, not just the priming UserCmd. Proactive follow-up
+  while investigating the priming-UserCmd retry fix earlier the same day -- same real class of
+  bug, one stage earlier in the handshake: `net_connect()` was only ever called once at boot, with
+  nothing to retry it if the initial CONNECT packet, or the server's WELCOME reply, is lost in
+  transit. A lost CONNECT (or lost WELCOME) leaves the client showing its own local-mode fallback
+  scene forever -- indistinguishable from every other "connected but nothing happens" symptom
+  already chased down this session, just one handshake stage earlier. Retries every 2s for as
+  long as `my_client_id` is still unset (never welcomed) -- safe to repeat since the guard means
+  it only ever fires before any real WELCOME has landed, so no risk of double-joining or wasting a
+  real one-seat-per-identity slot on an already-connected session. Verified live under Xvfb
+  against the real local production server: clean single connect (exactly one real "CLIENT 10
+  CONNECTED" log line, no retry spam once WELCOME lands), same real cmd_seen=1/Clients:10 result
+  as the other fixes today -- no regression, real resilience against a failure mode nothing
+  covered before. `gcc -Wall` clean. CI green with a real artifact (`ShankPit_Builds_15`).
+  `7a6e202`.
+
 ## 2026-08-04 (4)
 
 - fix(lobby): retry the priming UserCmd and the initial CONNECT itself, not one-shot. Founder,
