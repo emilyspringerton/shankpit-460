@@ -2206,6 +2206,24 @@ int main(int argc, char* argv[]) {
                         net_last_cmd_send_ms = now_ms;
                         if (net_spawn_protect_cmds > 0) net_spawn_protect_cmds--;
                     }
+                } else if (net_local_pid > 0) {
+                    /* Real bug found live (2026-08-04, founder, after the first WELCOME-time
+                       priming fix: "ok still same thing i am queued into a game but i am stuck
+                       in osaka garage and cant move") -- that fix sent exactly one priming
+                       UserCmd, a single unreliable UDP packet, with no retry. Fine over this same
+                       box's own loopback (where the earlier fix was verified -- zero real packet
+                       loss), but a genuinely remote connection over the real internet can lose
+                       that one packet, and nothing ever sent a second one -- the exact same
+                       connect/movement deadlock this was meant to fix, just one dropped packet
+                       away from reappearing with no recovery path. Retries on the same real
+                       throttle interval every frame until net_have_initial_local_snapshot_sync
+                       actually flips true, so a lost priming packet self-heals within one more
+                       interval instead of stalling the session permanently. */
+                    unsigned int now_ms = SDL_GetTicks();
+                    if (now_ms - net_last_cmd_send_ms >= CLIENT_USERCMD_INTERVAL_MS) {
+                        net_send_cmd(client_create_cmd(0.0f, 0.0f, cam_yaw, cam_pitch, 0, 0, 0, 0, 0, 0, wpn_req));
+                        net_last_cmd_send_ms = now_ms;
+                    }
                 }
                 client_decay_pending_correction(SDL_GetTicks());
                 net_apply_remote_interpolation(SDL_GetTicks());
