@@ -1985,9 +1985,18 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
     SDL_Window *win = SDL_CreateWindow("SHANKPIT [BUILD 181 - CTF RELOADED]", 100, 100, 1280, 720, SDL_WINDOW_OPENGL);
     SDL_GL_CreateContext(win);
+    /* Real Xbox controller support (2026-08-04, founder: "ensure we have controller mappings for
+     * all games") -- same pressure-sensitive-trigger pattern already proven in
+     * WEAKNIGHT_BEDROCK_RACERS/apps/client/src/main.c. Right trigger fires (analog, real trigger
+     * travel not a digital button), left stick moves, right stick looks, keyboard/mouse remain
+     * the real fallback whenever no controller is connected. */
+    SDL_GameController *g_shank_pad = NULL;
+    for (int gi = 0; gi < SDL_NumJoysticks(); gi++) {
+        if (SDL_IsGameController(gi)) { g_shank_pad = SDL_GameControllerOpen(gi); if (g_shank_pad) break; }
+    }
     proctex_init();
     proc_tex_create(&g_vehicle_noise_tex, 64, 64);
     proctex_make_noise_rgba(&g_vehicle_noise_tex, 64, 64, g_vehicle_style.seed);
@@ -2025,6 +2034,14 @@ int main(int argc, char* argv[]) {
         SDL_Event e;
         while(SDL_PollEvent(&e)) {
             if(e.type == SDL_QUIT) running = 0;
+            if(e.type == SDL_CONTROLLERDEVICEADDED && !g_shank_pad) {
+                g_shank_pad = SDL_GameControllerOpen(e.cdevice.which);
+            }
+            if(e.type == SDL_CONTROLLERDEVICEREMOVED && g_shank_pad
+               && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_shank_pad))) {
+                SDL_GameControllerClose(g_shank_pad);
+                g_shank_pad = NULL;
+            }
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && app_state != STATE_LOBBY) SDL_SetRelativeMouseMode(SDL_TRUE);
             if (e.type == SDL_MOUSEBUTTONDOWN && app_state != STATE_LOBBY) SDL_SetRelativeMouseMode(SDL_TRUE);
             
@@ -2202,6 +2219,29 @@ int main(int argc, char* argv[]) {
             int ability = k[SDL_SCANCODE_E];
             if(k[SDL_SCANCODE_1]) wpn_req=0; if(k[SDL_SCANCODE_2]) wpn_req=1;
             if(k[SDL_SCANCODE_3]) wpn_req=2; if(k[SDL_SCANCODE_4]) wpn_req=3; if(k[SDL_SCANCODE_5]) wpn_req=4; if(k[SDL_SCANCODE_6]) wpn_req=5;
+            if (g_shank_pad) {
+                const float SHANK_STICK_DEADZONE = 0.2f;
+                float lx = (float)SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
+                float ly = (float)SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
+                if (fabsf(lx) > SHANK_STICK_DEADZONE) str += lx;
+                if (fabsf(ly) > SHANK_STICK_DEADZONE) fwd -= ly;
+                float rx = (float)SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f;
+                float ry = (float)SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f;
+                if (fabsf(rx) > SHANK_STICK_DEADZONE) { cam_yaw -= rx * 3.0f; if(cam_yaw > 360) cam_yaw -= 360; if(cam_yaw < 0) cam_yaw += 360; }
+                if (fabsf(ry) > SHANK_STICK_DEADZONE) cam_pitch -= ry * 3.0f;
+                /* Real pressure-sensitive fire -- right trigger's actual analog travel (0..32767),
+                   same convention WEAKNIGHT_BEDROCK_RACERS already established, not a digital button. */
+                Sint16 rt = SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+                shoot = shoot || (rt > 8000);
+                jump = jump || SDL_GameControllerGetButton(g_shank_pad, SDL_CONTROLLER_BUTTON_A);
+                crouch = crouch || SDL_GameControllerGetButton(g_shank_pad, SDL_CONTROLLER_BUTTON_B);
+                reload = reload || SDL_GameControllerGetButton(g_shank_pad, SDL_CONTROLLER_BUTTON_X);
+                use = use || SDL_GameControllerGetButton(g_shank_pad, SDL_CONTROLLER_BUTTON_Y);
+                ability = ability || (SDL_GameControllerGetAxis(g_shank_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000)
+                          || SDL_GameControllerGetButton(g_shank_pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+                float move_len2 = sqrtf(fwd * fwd + str * str);
+                if (move_len2 > 1.0f) { fwd /= move_len2; str /= move_len2; }
+            }
 
             int fov_pid = (app_state == STATE_GAME_NET && net_local_pid > 0 && local_state.players[net_local_pid].active)
                 ? net_local_pid
