@@ -1943,6 +1943,21 @@ void net_tick() {
 
             printf("[NET] WELCOME my_client_id=%d net_local_pid=%d\n", my_client_id, net_local_pid);
             printf("✅ JOINED SERVER AS CLIENT ID: %d\n", my_client_id);
+
+            /* Real deadlock found live (2026-08-04, founder: "i cant move and the dagger is
+               equipped" / "i dont see any enemies"): the normal per-frame movement block only
+               ever calls net_send_cmd once net_have_initial_local_snapshot_sync is true (that
+               flag is set the moment a real snapshot containing this client's own id arrives) --
+               but apps/server/src/main.c's own server_broadcast only includes a client once
+               slots[client_id].cmd_seen is true, which is only ever set inside process_user_cmd,
+               which only ever runs on a real PACKET_USERCMD from that client. A freshly connected
+               real player can therefore never move at all: the client is waiting for a snapshot
+               that will never arrive because the server is waiting for a command that will never
+               be sent. Breaking it here with one real, neutral (no movement/no buttons) UserCmd
+               sent immediately on WELCOME -- this is exactly the same real packet shape the
+               normal per-frame path already builds and sends, just fired once up front instead
+               of waiting on the snapshot-first condition that can never be satisfied without it. */
+            net_send_cmd(client_create_cmd(0.0f, 0.0f, cam_yaw, cam_pitch, 0, 0, 0, 0, 0, 0, wpn_req));
         }
     }
 }
