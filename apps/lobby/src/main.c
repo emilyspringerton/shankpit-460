@@ -43,7 +43,14 @@
 #define STATE_GAME_LOCAL 2
 #define STATE_LISTEN_SERVER 99
 
-char SERVER_HOST[64] = "s.farthq.com";
+/* Real bug found live (2026-08-04, founder: "i joined a game but its on s.farthq.com i think
+   shankpit 460 will be running on servers on the okemily server (this localhost)") --
+   s.farthq.com resolves to 194.195.120.185, a real but completely different, unrelated server --
+   not this box (confirmed: this box's own real public IP, 198.58.107.85, is exactly okemily.com's
+   own DNS record). shankpit460-server.service and the real 9-bot pool this session just verified
+   live both run on THIS box; a client defaulting to s.farthq.com could never see either one,
+   matching the founder's own live report of no bots. */
+char SERVER_HOST[64] = "okemily.com";
 int SERVER_PORT = 6969;
 
 int app_state = STATE_LOBBY;
