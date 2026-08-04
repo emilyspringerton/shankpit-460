@@ -1,5 +1,24 @@
 # SHANKPIT-460 Changelog
 
+## 2026-08-04 (4)
+
+- fix(lobby): retry the priming UserCmd and the initial CONNECT itself, not one-shot. Founder,
+  live, after testing the WELCOME-time priming fix: "ok still same thing i am queued into a game
+  but i am stuck in osaka garage and cant move." Real gap: that fix sent exactly one priming
+  UserCmd on WELCOME, a single unreliable UDP packet with no retry -- fine over this same box's
+  own loopback (near-zero packet loss), but a genuinely remote connection over the real internet
+  can lose that one packet and land back in the exact same stuck state with no recovery. Now
+  retries on the real per-frame throttle interval for as long as `net_have_initial_local_
+  snapshot_sync` hasn't flipped true. Same real gap found and fixed one stage earlier too: the
+  initial CONNECT itself (`net_connect`) was also only ever sent once at boot, with nothing to
+  retry it if the CONNECT packet or the server's WELCOME reply is lost -- now retries every 2s for
+  as long as `my_client_id` is still unset, safe to repeat since it only ever fires before any
+  real WELCOME has landed. Verified live under Xvfb against the real local production server both
+  times: fresh connect immediately shows "slot=10 active=1 welcomed=1 cmd_seen=1
+  player_active=1" and "Clients: 10", no regression from the original one-shot fix's own verified
+  behavior, now with real resilience to packet loss neither original fix had. `gcc -Wall` clean.
+  CI green with a real artifact (`ShankPit_Builds_13`). `68597e3`.
+
 ## 2026-08-04 (3)
 
 - fix(lobby): break the connect/movement deadlock -- send a priming UserCmd on WELCOME. Founder,
