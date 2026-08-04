@@ -1,6 +1,19 @@
 # SHANKPIT-460
 
 **This is `shankpit-460`** — forked from [`SHANKPIT`](https://github.com/emilyspringerton/SHANKPIT)
+## Current Status (2026-08-04)
+
+Real bot-pool deathmatch is live: client boots directly into a match (no lobby yet), first-to-13-
+kills-or-5-minutes, 9-bot pool via the existing `shankpit460-emily-bot.service`. Real connectivity
+fixes shipped (missing connect-ticket, WELCOME-time deadlock, retry logic for both) and confirmed
+working over loopback — but **real remote players still can't connect**: server logs show zero
+non-`127.0.0.1` connections ever, strong evidence of a Linode Cloud Firewall block at the network
+edge (separate from the `ufw` rule already opened). Needs founder action in the Linode console
+(console.linode.com → instance → Firewalls → allow inbound UDP 6969) — not fixable from code. See
+`CHANGELOG.md` for the full trail.
+
+---
+
 at tag `460` (2026-07-18). It diverges from the parent project from here forward with a distinct
 mission: a stripped-down, low-system-spec competitive esports FPS, aimed at a large global
 audience precisely *because* it can run on modest hardware. It deliberately does not carry forward
