@@ -1,5 +1,24 @@
 # SHANKPIT-460 Changelog
 
+## 2026-08-04 (2)
+
+- fix(lobby): default SERVER_HOST pointed at a real but unrelated server. Founder, live, after
+  testing the direct-boot change: "i joined a game but its on s.farthq.com i think shankpit 460
+  will be running on servers on the okemily server (this localhost)." Confirmed by DNS lookup:
+  `s.farthq.com` resolves to `194.195.120.185`, a real but completely different server -- not this
+  box. This box's own real public IP (`198.58.107.85`) is exactly `okemily.com`'s own DNS record.
+  `shankpit460-server.service` and the real 9-bot pool this session already shipped both run on
+  THIS box only -- a client defaulting to `s.farthq.com` could never see either one, matching the
+  founder's own live report of "no bots" and a jittery/stale session on whatever that other server
+  actually is. Default `SERVER_HOST` changed to `okemily.com`. Founder separately ran the
+  already-queued `sudo-queue/10-shankpit460-firewall.sh` live during the same session, opening
+  6969/udp for real external traffic. Verified DNS/connect-attempt locally (client log: "Connected
+  to okemily.com..."); full external reachability (a real remote client, not same-box) couldn't be
+  confirmed from this same box -- a same-box UDP round-trip test timed out both before and after
+  the firewall rule, consistent with hairpin NAT (a box often can't reach its own public IP from
+  inside itself, a different, unrelated limitation from whether a genuinely remote client can). CI
+  green with a real artifact (`ShankPit_Builds_9`). `ddc5ea9`.
+
 ## 2026-08-04
 
 - feat(server,lobby): deathmatch win condition, real client ticket auth, direct-boot to bot pool.
