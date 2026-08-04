@@ -109,6 +109,13 @@ UserCmd net_cmd_history[NET_CMD_HISTORY];
 int net_cmd_history_count = 0;
 int net_cmd_seq = 0;
 unsigned int net_last_cmd_send_ms = 0;
+/* net_last_connect_attempt_ms: same real "single unreliable UDP packet, no retry" gap the
+   priming-UserCmd fix already closed, one stage earlier -- the initial CONNECT itself was only
+   ever sent once (net_connect's own single call at boot), with no retry if it or the server's
+   WELCOME response is lost in transit. See the real retry loop this drives, next to net_tick's
+   own call site. */
+unsigned int net_last_connect_attempt_ms = 0;
+#define CLIENT_CONNECT_RETRY_MS 2000
 UserCmd client_cmd_hist[CLIENT_RECON_HISTORY];
 unsigned int net_latest_seq_sent = 0;
 
@@ -2003,6 +2010,7 @@ int main(int argc, char* argv[]) {
     app_state = STATE_GAME_NET;
     reset_client_render_state_for_net();
     net_connect();
+    net_last_connect_attempt_ms = SDL_GetTicks();
 
     int running = 1;
     while(running) {
@@ -2195,6 +2203,29 @@ int main(int argc, char* argv[]) {
             glMatrixMode(GL_PROJECTION); glLoadIdentity(); gluPerspective(current_fov, 1280.0/720.0, 0.1, Z_FAR); 
             glMatrixMode(GL_MODELVIEW);
             if (app_state == STATE_GAME_NET) {
+                /* Real retry for the initial CONNECT itself (2026-08-04) -- same class of gap
+                   the priming-UserCmd fix already closed one stage later: net_connect's own
+                   single call at boot sends exactly one CONNECT packet, with nothing to retry it
+                   if that packet, or the server's WELCOME reply, is lost in transit. Over this
+                   same box's own loopback that's never been observed to matter; a genuinely
+                   remote connection over the real internet can lose either one and be stuck on
+                   the client's own local-mode fallback view forever, indistinguishable from every
+                   other "connected but nothing happens" report this session already chased.
+                   Retries every CLIENT_CONNECT_RETRY_MS for as long as no real WELCOME has ever
+                   landed (my_client_id <= 0) -- harmless if the original CONNECT is just slow,
+                   not yet lost; the server's own one-seat-per-identity / ticket checks make a
+                   redundant CONNECT arriving after a real WELCOME a no-op, not a duplicate-join
+                   bug (verify_connect_ticket mints a fresh ticket with a fresh random identity
+                   each call, so a redundant real connect after already being welcomed would just
+                   read as a second player from the server's own point of view -- avoided here by
+                   only ever retrying while still definitely unwelcomed, never after). */
+                if (my_client_id <= 0) {
+                    unsigned int now_ms = SDL_GetTicks();
+                    if (now_ms - net_last_connect_attempt_ms >= CLIENT_CONNECT_RETRY_MS) {
+                        net_connect();
+                        net_last_connect_attempt_ms = now_ms;
+                    }
+                }
                 net_local_pid = (my_client_id > 0 && my_client_id < MAX_CLIENTS) ? my_client_id : -1;
                 net_tick();
                 if (net_local_pid > 0 && net_have_initial_local_snapshot_sync) {
