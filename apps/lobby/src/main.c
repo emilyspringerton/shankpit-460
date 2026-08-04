@@ -34,6 +34,7 @@
 #include "../../../packages/common/physics.h"
 #include "../../../packages/common/shared_movement.h"
 #include "../../../packages/common/net_sim.h"
+#include "../../../packages/common/hmac_sha256.h"
 #include "../../../packages/simulation/local_game.h"
 #include "../../../packages/render/proc_tex.h"
 
@@ -1408,18 +1409,59 @@ void net_shutdown() {
     reset_client_render_state_for_net();
 }
 
+// Connect-ticket minting (2026-08-04) -- real bug found while wiring the client to boot
+// directly into a match: apps/server/src/main.c's verify_connect_ticket (S156-02) has required
+// every real PACKET_CONNECT to carry a valid HMAC ticket since 2026-07-18, fails closed if
+// SHANKPIT_TICKET_SECRET is unset, but this client's own net_connect() never sent one at all --
+// a bare PACKET_CONNECT with no ticket, which the real production server has been silently
+// rejecting this whole time. IDUNA's real player-identity ticket mint (POST
+// /api/v1/shankpit/ticket, requires a real OAuth-authenticated JWT) is the intended path for a
+// real ranked/stat-tracked match; that login flow doesn't exist in this client yet and is real,
+// separate scope (see backlog). For "just the bot pool" this pass, mirrored apps2/emily-bot's
+// own real, already-proven approach instead (main.go's mintTicket): the same
+// TICKET_PAYLOAD_LEN/TICKET_MAC_LEN wire format and the same HMAC-SHA256 algorithm the C server
+// already verifies with, computed locally from $SHANKPIT_TICKET_SECRET (the same shared secret
+// the server and emily-bot both already read from env) over a random 16-byte stand-in player_id
+// -- a real, valid ticket by the server's own verification logic, just not tied to a real IDUNA
+// identity. Stats simply won't attribute to a real account for these matches (report_match_results
+// already skips anyone without has_player_id) -- an accepted, explicit gap, not a silent one.
+#define TICKET_PAYLOAD_LEN 20
+#define TICKET_MAC_LEN 16
+#define TICKET_TOTAL_LEN (TICKET_PAYLOAD_LEN + TICKET_MAC_LEN)
+
+static void mint_client_ticket(unsigned char out_ticket[TICKET_TOTAL_LEN]) {
+    unsigned char payload[TICKET_PAYLOAD_LEN];
+    for (int i = 0; i < 16; i++) payload[i] = (unsigned char)(rand() & 0xFF);
+    unsigned int expires_at = (unsigned int)time(NULL) + 300; // 5-minute TTL, matches the server's own ticketTTL
+    payload[16] = (unsigned char)(expires_at & 0xFF);
+    payload[17] = (unsigned char)((expires_at >> 8) & 0xFF);
+    payload[18] = (unsigned char)((expires_at >> 16) & 0xFF);
+    payload[19] = (unsigned char)((expires_at >> 24) & 0xFF);
+
+    const char *secret = getenv("SHANKPIT_TICKET_SECRET");
+    if (!secret) secret = ""; // matches the server's own fail-closed contract -- an all-zero-keyed MAC a real server will correctly reject, not a silent bypass
+    unsigned char mac[32];
+    hmac_sha256((const uint8_t *)secret, strlen(secret), payload, TICKET_PAYLOAD_LEN, mac);
+
+    memcpy(out_ticket, payload, TICKET_PAYLOAD_LEN);
+    memcpy(out_ticket + TICKET_PAYLOAD_LEN, mac, TICKET_MAC_LEN);
+}
+
 void net_connect() {
     if (sock < 0) net_init();
     struct hostent *he = gethostbyname(SERVER_HOST);
     if (he) {
-        server_addr.sin_family = AF_INET; 
-        server_addr.sin_port = htons(SERVER_PORT); 
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(SERVER_PORT);
         memcpy(&server_addr.sin_addr, he->h_addr_list[0], he->h_length);
         char buffer[128];
         NetHeader *h = (NetHeader*)buffer;
         h->type = PACKET_CONNECT;
         h->scene_id = 0;
-        sendto(sock, buffer, sizeof(NetHeader), 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+        unsigned char ticket[TICKET_TOTAL_LEN];
+        mint_client_ticket(ticket);
+        memcpy(buffer + sizeof(NetHeader), ticket, TICKET_TOTAL_LEN);
+        sendto(sock, buffer, sizeof(NetHeader) + TICKET_TOTAL_LEN, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
         printf("Connected to %s...\n", SERVER_HOST);
     } else {
         printf("Failed to resolve %s\n", SERVER_HOST);
@@ -1926,7 +1968,20 @@ int main(int argc, char* argv[]) {
         ui_use_server = 1;
         ui_last_poll = SDL_GetTicks();
     }
-    
+
+    /* Boot directly into the bot-pool match (2026-08-04, founder: "the client will boot into
+       matchmaking directly - first into the bot pool" -> "for now just the bot pool we will
+       bring the lobby back once we get the bot matches working"). "Matchmaking" for the bot-pool
+       case is just this one always-on persistent server (docs2/NORTHSTAR.md's own real v0
+       design -- no per-match instances, no separate queue-then-connect step needed the way a
+       real player-vs-player queue would) -- shankpit460-emily-bot.service already keeps 9 real
+       bot opponents connected to it. Same real join path LOBBY_JOIN's own button already used
+       (lobby_start_action, still fully intact below for when the lobby comes back), just fired
+       immediately instead of waiting for a menu click. */
+    app_state = STATE_GAME_NET;
+    reset_client_render_state_for_net();
+    net_connect();
+
     int running = 1;
     while(running) {
         SDL_Event e;

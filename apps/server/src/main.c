@@ -34,7 +34,16 @@ unsigned int client_last_seq[MAX_CLIENTS];
 // Server ticks at 16ms (see the usleep(16000) in main's loop) -> 62.5
 // ticks/sec -> exactly 3750 ticks/minute.
 #define TICKS_PER_MINUTE 3750
-#define DEFAULT_MATCH_MINUTES 10
+#define DEFAULT_MATCH_MINUTES 5 /* real match format (2026-08-04, founder): "deathmatch first to 13 kills wins or 5minutes" */
+
+// Deathmatch win condition (2026-08-04, founder): "deathmatch first to 13 kills wins or
+// 5minutes." Real opponent-fill ("the bot pool") is the existing shankpit460-emily-bot.service
+// -- real, network-connected emily-bot processes permanently queued into this server, the same
+// persistent-bot-pool pattern this fork's own backlog already names as parity with REDGARDEN's
+// own arena bot pool ("the treatment our early arena builds established," S170-83). Bot count
+// there bumped 6->9 to make a real player's match a real 10-player game, not duplicated here as
+// a second, server-simulated NPC mechanism.
+#define DEATHMATCH_WIN_KILLS 13
 
 // Connect-ticket verification (S156-02, EMILY/BACKLOG.md SECTION 156).
 // Wire format (36 bytes total, appended after the 12-byte NetHeader in a
@@ -838,6 +847,21 @@ int main(int argc, char *argv[]) {
                     slots[i].cmd_seen,
                     local_state.players[i].active,
                     local_state.client_meta[i].last_heard_ms);
+            }
+        }
+
+        /* Deathmatch win condition (2026-08-04, founder: "deathmatch first to 13 kills wins or
+           5minutes") -- checked every tick, alongside (not instead of) the existing time-limit
+           boundary just below: whichever real condition is met first ends the round. complete_match
+           itself doesn't care WHY it was called (kills or timer) -- it always logs standings,
+           reports results, and resets for the next round; the printf here just records which
+           condition actually triggered, for the same real server log complete_match's own
+           MATCH_COMPLETE line already writes to. */
+        for (int wi = 0; wi < MAX_CLIENTS; wi++) {
+            if (local_state.players[wi].active && local_state.players[wi].kills >= DEATHMATCH_WIN_KILLS) {
+                printf("MATCH_WIN_BY_KILLS client=%d kills=%d\n", wi, local_state.players[wi].kills);
+                complete_match(match_minutes);
+                break;
             }
         }
 

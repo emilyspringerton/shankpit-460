@@ -9,12 +9,11 @@
 # does hit that duration cap.
 #
 # Bot count (S170-83, "operational parity" with REDGARDEN's persistent bot
-# pool): bumped from 1 to 6. Free-for-all deathmatch, not team-based (see
-# docs2/NORTHSTAR.md), and this repo's whole mission is staying playable on
-# low-end hardware -- 6 gives a real firefight with multiple simultaneous
-# opponents without matching REDGARDEN's MOBA-scale 19, which would be both
-# unnecessary for FFA and heavier than this repo's own low-spec mandate
-# wants for a background fill population.
+# pool): bumped from 1 to 6, then 6 to 9 (2026-08-04, founder: "the client
+# will boot into matchmaking directly - first into the bot pool" -> "have
+# the bot games be like 10 players so the bot pool should be 9" -- a real
+# player + 9 bots = a real 10-player match). Free-for-all deathmatch, not
+# team-based (see docs2/NORTHSTAR.md).
 #
 # Deploy:
 #   cp ops/systemd/shankpit460-emily-bot.service ~/.config/systemd/user/
@@ -26,7 +25,7 @@
 # already, and passing secrets as flags leaks them into `ps`/`systemctl
 # status` output in plaintext.
 #
-# Added 2026-07-19. Bot count bumped 2026-07-24 (S170-83).
+# Added 2026-07-19. Bot count bumped 2026-07-24 (S170-83), 2026-08-04 (10-player games).
 
 [Unit]
 Description=SHANKPIT-460 emily-bot fill players (keeps a bot pool queued for opponents)
@@ -40,7 +39,7 @@ EnvironmentFile=/home/fatbaby/.config/iduna/env
 ExecStart=/home/fatbaby/shankpit-460/bin/emily-bot \
     -host 127.0.0.1 \
     -port 6969 \
-    -bots 6 \
+    -bots 9 \
     -duration 87600h
 Restart=always
 RestartSec=10s
