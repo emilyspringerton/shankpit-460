@@ -1,5 +1,30 @@
 # SHANKPIT-460 Changelog
 
+## 2026-08-04
+
+- feat(server,lobby): deathmatch win condition, real client ticket auth, direct-boot to bot pool.
+  Founder: "the client will boot into matchmaking directly - first into the bot pool - deathmatch
+  first to 13 kills wins or 5minutes" -> "for now just the bot pool we will bring the lobby back
+  once we get the bot matches working" -> "have the bot games be like 10 players so the bot pool
+  should be 9." Added a real 13-kill win condition alongside the existing 5-minute timer
+  (`complete_match`, checked every tick); default match length 10 -> 5 min to match. Considered
+  and reverted a server-simulated bot-AI system before committing -- `bot_ai.h`'s own dead-code
+  `bot_think()` looked like the fix, but this fork already has a proven, live, real bot-pool
+  mechanism (`shankpit460-emily-bot.service`, real network-connected processes, the same
+  REDGARDEN-parity pattern this fork's own backlog already names as the model, S170-83) --
+  bumped that pool 6 -> 9 instead of duplicating it. Real bug found and fixed in the client
+  while wiring the boot-flow change: `apps/lobby`'s own `net_connect()` never sent a connect
+  ticket at all, despite the server requiring one (fail-closed) since S156-02 -- the real
+  graphical client could never actually connect to the real production server. Fixed by minting
+  a real, valid HMAC-SHA256 ticket client-side (mirrors `apps2/emily-bot`'s own already-proven
+  approach), not yet tied to a real IDUNA identity (real, separate scope, explicit gap not a
+  silent one). Client now boots directly into a networked bot-pool match instead of waiting at
+  the lobby menu; lobby code left fully intact for later. Verified live end-to-end under Xvfb
+  against the real local production server: client skipped the lobby, connected with a real
+  ticket ("CLIENT 10 CONNECTED"), rendered the real in-game HUD alongside the 9 already-connected
+  bots; kill-count win condition separately verified live ("MATCH_WIN_BY_KILLS client=3
+  kills=13"). `gcc -Wall` clean. `5340dc3`.
+
 ## 2026-07-25
 
 - docs: "NOT THE REAL SERVER" warning comments on the two dead server implementations
