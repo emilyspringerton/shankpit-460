@@ -1,3 +1,6 @@
+## 2026-08-04 (6)
+- feat(input): real Xbox controller support -- pressure-sensitive fire (real trigger travel), dual-stick move/look, A/B/X/Y mapped to jump/crouch/reload/use. Keyboard/mouse remain the real fallback. gcc clean.
+
 # SHANKPIT-460 Changelog
 
 ## 2026-08-04 (5)
