@@ -1,5 +1,31 @@
 # SHANKPIT-460 Changelog
 
+## 2026-08-04 (3)
+
+- fix(lobby): break the connect/movement deadlock -- send a priming UserCmd on WELCOME. Founder,
+  live, after the SERVER_HOST fix let a real remote client connect for the first time: "ok it
+  says connected to okemily.com in the console i am in the osaka garage and i cant move and the
+  dagger is equipped" -> "i dont see any enemies." Real, complete deadlock found by reading both
+  sides of the wire protocol: the client's own per-frame movement block only ever calls
+  `net_send_cmd` once `net_have_initial_local_snapshot_sync` is true (set the moment a real
+  snapshot containing this client's own id arrives), but `server_broadcast` only includes a
+  client in ANY snapshot once `slots[client_id].cmd_seen` is true -- set only inside
+  `process_user_cmd`, which only runs on a real `PACKET_USERCMD` from that client. A freshly
+  connected player could therefore never move and never appear in a snapshot for anyone else to
+  see: the client waits for a snapshot that will never arrive because the server waits for a
+  command that will never be sent. Likely never hit before this session -- the connect-ticket bug
+  fixed earlier the same day meant no real remote client had ever gotten past the connection
+  stage at all until today. Fixed by sending one real, neutral (zero movement, no buttons)
+  UserCmd immediately on WELCOME -- the exact same packet shape/send path the normal per-frame
+  loop already uses, just fired once up front. Verified live under Xvfb against the real local
+  production server: before the fix, the new slot never appeared in the server's own periodic
+  status log at all (client log showed real connect-attempt success with no server-side
+  progress); after the fix, "slot=10 active=1 welcomed=1 cmd_seen=1 player_active=1" and
+  "Clients: 10" (9 bots + the real client) appear immediately, and the client's own rendered
+  camera position/world state visibly changes frame to frame (real snapshot-driven sync) instead
+  of staying frozen on one static view. `gcc -Wall` clean. CI green with a real artifact
+  (`ShankPit_Builds_11`). `ee69bfc`.
+
 ## 2026-08-04 (2)
 
 - fix(lobby): default SERVER_HOST pointed at a real but unrelated server. Founder, live, after
