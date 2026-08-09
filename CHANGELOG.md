@@ -1,3 +1,7 @@
+## 2026-08-09
+
+- ops: restarted stale live server (running since Aug 4 15:50, 5 days pre-dating the connect/movement priming-fix commits) + rebuilt/relaunched the emily-bot pool (bin/emily-bot binary had gone missing, rebuilt from apps2/emily-bot). Live-verified end-to-end under Xvfb: fresh client connects and moves cleanly (reconcile ack incrementing, no deadlock) against the fresh server. Root cause of founder's 'stuck in Osaka garage' report is almost certainly a stale cached client build predating the Aug 4 fixes -- code itself is correct and verified working (sess-20260809-1420-e9d3d7f8)
+
 ## 2026-08-04 (6)
 - feat(input): real Xbox controller support -- pressure-sensitive fire (real trigger travel), dual-stick move/look, A/B/X/Y mapped to jump/crouch/reload/use. Keyboard/mouse remain the real fallback. gcc clean.
 
