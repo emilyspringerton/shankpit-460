@@ -166,7 +166,7 @@ jobs:
           cp sdl2_mingw/bin/SDL2.dll ShankPit_Client/
           cp -r maps ShankPit_Client/
           cp SHANKPIT_CONSTRUCT.txt ShankPit_Client/
-          printf '%s\r\n' "@echo off" "set SHANKPIT_TICKET_SECRET=d16057fd752a71e5fc9a8c692bbcac1d44a1f64b5611446f4eeae092635f1542" "start ShankPit.exe" > ShankPit_Client/PLAY.bat
+          printf '%s\r\n' "@echo off" "set SHANKPIT_TICKET_SECRET=d16057fd752a71e5fc9a8c692bbcac1d44a1f64b5611446f4eeae092635f1542" "echo Connecting to okemily.com ..." "ShankPit.exe" "pause" > ShankPit_Client/PLAY.bat
           zip -r "ShankPit_Client_${BUILD}.zip" ShankPit_Client
 
           mkdir -p ShankPit_Bots
