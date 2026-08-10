@@ -1,3 +1,7 @@
+## 2026-08-10
+
+- fix(net): CI-bundled Windows client never had a valid connect ticket — root cause of every 'stuck in Osaka garage, can't move' report since this shipped. mint_client_ticket() reads SHANKPIT_TICKET_SECRET from the environment; that var only ever existed in this server's own shell config, never in the distributed PLAY.bat. Every real downloaded client signed its ticket with an empty-string key, the server's verify_connect_ticket() silently dropped it (no slot, no WELCOME, nothing logged) -- looked identical to a network/firewall block from every angle that doesn't know to check this. Fixed both tests.yml and release.yml to set SHANKPIT_TICKET_SECRET in the generated PLAY.bat, same pattern REDGARDEN's own PLAY.bat already uses for its ticket secret. Live-verified: a client using only this env var (no other config) connects clean, real WELCOME, real snapshot reconciliation. (sess-20260809-1420-e9d3d7f8)
+
 ## 2026-08-09
 
 - ops: restarted stale live server (running since Aug 4 15:50, 5 days pre-dating the connect/movement priming-fix commits) + rebuilt/relaunched the emily-bot pool (bin/emily-bot binary had gone missing, rebuilt from apps2/emily-bot). Live-verified end-to-end under Xvfb: fresh client connects and moves cleanly (reconcile ack incrementing, no deadlock) against the fresh server. Root cause of founder's 'stuck in Osaka garage' report is almost certainly a stale cached client build predating the Aug 4 fixes -- code itself is correct and verified working (sess-20260809-1420-e9d3d7f8)
