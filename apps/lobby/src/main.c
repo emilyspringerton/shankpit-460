@@ -376,25 +376,32 @@ void draw_string(const char* str, float x, float y, float size) {
     turtle_draw_text(&pen, str);
 }
 
+/* S169-02: front door reduced to 3 actions -- founder: "2 buttons bots and
+ * online... a third for empty." TDM/CTF/Evolution/direct-remote-join are
+ * gone from this list (still reachable in code via LobbyAction's own
+ * switch below if a future ask brings one back), matching the "lean
+ * esports fork" mission stated in this repo's own CLAUDE.md -- the front
+ * door shows exactly what a competitive player picking a match needs, not
+ * every mode this codebase can technically run. Ported from a reference
+ * implementation found already built against the wrong tree (apps2/lobby/
+ * src/main.c, confirmed dead by S169-01) -- adapted into this file's own
+ * more evolved menu architecture (server-driven ui_state.entries override,
+ * double-click rename, generic N-item list rendering) rather than copied
+ * verbatim, since apps2's version was 3 hardcoded fixed-position buttons
+ * built for a simpler tree that doesn't have any of that. */
 typedef enum {
-    LOBBY_DEMO = 0,
-    LOBBY_BATTLE,
-    LOBBY_TDM,
-    LOBBY_CTF,
-    LOBBY_EVOLUTION,
-    LOBBY_JOIN,
+    LOBBY_BOTS = 0,
+    LOBBY_ONLINE,
+    LOBBY_EMPTY,
     LOBBY_COUNT
 } LobbyAction;
 
 char lobby_labels_mutable[LOBBY_COUNT][64];
 
 static const char *LOBBY_LABELS[LOBBY_COUNT] = {
-    "DEMO (SOLO)",
-    "BATTLE (BOTS)",
-    "TEAM DM (BOTS)",
-    "LAN CTF",
-    "EVOLUTION",
-    "JOIN S.FARTHQ.COM"
+    "BOTS",
+    "ONLINE",
+    "EMPTY"
 };
 
 static void lobby_init_labels() {
@@ -521,27 +528,26 @@ static void lobby_start_action(int action) {
             }
         }
     }
-    if (action == LOBBY_JOIN) {
+    if (action == LOBBY_ONLINE) {
+        /* Design decision re-confirmed on port (S169-02): ONLINE means the
+         * local Go server (127.0.0.1) -- the deployment actually running
+         * the emily-bot permanent opponent and being actively developed
+         * against right now -- not SERVER_HOST's own default
+         * ("okemily.com", the remote production host). Revisit once that
+         * remote deployment's status/build is verified against this one. */
+        strncpy(SERVER_HOST, "127.0.0.1", sizeof(SERVER_HOST) - 1);
+        SERVER_HOST[sizeof(SERVER_HOST) - 1] = '\0';
         app_state = STATE_GAME_NET;
         reset_client_render_state_for_net();
         net_connect();
     } else {
         app_state = STATE_GAME_LOCAL;
         switch (action) {
-            case LOBBY_DEMO:
-                local_init_match(1, MODE_DEATHMATCH);
-                break;
-            case LOBBY_BATTLE:
+            case LOBBY_BOTS:
                 local_init_match(12, MODE_DEATHMATCH);
                 break;
-            case LOBBY_TDM:
-                local_init_match(12, MODE_TDM);
-                break;
-            case LOBBY_CTF:
-                local_init_match(8, MODE_CTF);
-                break;
-            case LOBBY_EVOLUTION:
-                local_init_match(8, MODE_EVOLUTION);
+            case LOBBY_EMPTY:
+                local_init_match(1, MODE_DEATHMATCH);
                 break;
             default:
                 break;
@@ -2156,9 +2162,12 @@ int main(int argc, char* argv[]) {
        case is just this one always-on persistent server (docs2/NORTHSTAR.md's own real v0
        design -- no per-match instances, no separate queue-then-connect step needed the way a
        real player-vs-player queue would) -- shankpit460-emily-bot.service already keeps 9 real
-       bot opponents connected to it. Same real join path LOBBY_JOIN's own button already used
+       bot opponents connected to it. Same real join path LOBBY_ONLINE's own button uses
        (lobby_start_action, still fully intact below for when the lobby comes back), just fired
-       immediately instead of waiting for a menu click. */
+       immediately instead of waiting for a menu click -- though this auto-connect still targets
+       SERVER_HOST's own default (the remote host) rather than LOBBY_ONLINE's 127.0.0.1 override,
+       since it runs before any button click sets that; unrelated to S169-02's own scope, flagged
+       not fixed here. */
     app_state = STATE_GAME_NET;
     reset_client_render_state_for_net();
     net_connect();
