@@ -37,6 +37,7 @@
 #include "../../../packages/common/hmac_sha256.h"
 #include "../../../packages/simulation/local_game.h"
 #include "../../../packages/render/proc_tex.h"
+#include "../../../packages/audio/audio.h"
 
 #define STATE_LOBBY 0
 #define STATE_GAME_NET 1
@@ -1825,7 +1826,19 @@ void net_process_snapshot(char *buffer, int len) {
         p->hit_feedback = np->hit_feedback;
         p->ammo[p->current_weapon] = np->ammo;
 
-        if (now_shooting && !was_shooting) p->recoil_anim = 1.0f;
+        if (now_shooting && !was_shooting) {
+            p->recoil_anim = 1.0f;
+            /* S169-09: weapon-fire audio, spatialized against the local
+               listener -- fires for every player's shot the snapshot
+               reports (including the local player's own, at zero
+               distance), not just remote ones. */
+            if (my_client_id > 0 && my_client_id < MAX_CLIENTS) {
+                PlayerState *listener = &local_state.players[my_client_id];
+                audio_play_weapon(p->current_weapon, p->x, p->y, p->z,
+                                   listener->x, listener->y, listener->z,
+                                   listener->yaw * 0.0174533f);
+            }
+        }
 
         if (id == my_client_id) {
             local_seen = 1;
@@ -1997,6 +2010,7 @@ int main(int argc, char* argv[]) {
     for (int gi = 0; gi < SDL_NumJoysticks(); gi++) {
         if (SDL_IsGameController(gi)) { g_shank_pad = SDL_GameControllerOpen(gi); if (g_shank_pad) break; }
     }
+    audio_init(); /* S169-09: spatial audio, backported from SHANKPIT packages/audio/ */
     proctex_init();
     proc_tex_create(&g_vehicle_noise_tex, 64, 64);
     proctex_make_noise_rgba(&g_vehicle_noise_tex, 64, 64, g_vehicle_style.seed);
@@ -2376,6 +2390,7 @@ int main(int argc, char* argv[]) {
     }
     proc_tex_destroy(&g_vehicle_noise_tex);
     proc_tex_destroy(&g_vehicle_glitch_tex);
+    audio_shutdown();
     SDL_Quit();
     return 0;
 }
