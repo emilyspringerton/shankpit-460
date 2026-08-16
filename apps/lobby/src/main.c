@@ -2308,7 +2308,14 @@ int main(int argc, char* argv[]) {
                 net_apply_remote_interpolation(SDL_GetTicks());
             } else {
                 local_state.players[0].in_use = use;
-                if (use && local_state.players[0].vehicle_cooldown == 0 && local_state.transition_timer == 0) {
+                // S169-08: portal entry is automatic on proximity, no keypress -- split out from
+                // the vehicle toggle below, which stays keypress-gated (a separate, deliberately
+                // still-manual interaction). transition_timer's own guard (set to 12 the instant
+                // scene_request_transition fires, packages/simulation/local_game.h) is what
+                // prevents this from re-triggering every frame the player stands in the portal
+                // radius -- by the time it counts back down to 0 the player has already been
+                // moved to the destination scene's own spawn point, clear of the portal volume.
+                if (local_state.transition_timer == 0) {
                     PlayerState *p0 = &local_state.players[0];
                     int in_garage = local_state.scene_id == SCENE_GARAGE_OSAKA;
                     int portal_id = -1;
@@ -2321,12 +2328,14 @@ int main(int argc, char* argv[]) {
                             p0->vx = 0.0f; p0->vy = 0.0f; p0->vz = 0.0f;
                             scene_request_transition(dest_scene);
                         }
-                    } else if (in_garage && scene_near_vehicle_pad(local_state.scene_id, p0->x, p0->z, 6.0f, NULL)) {
-                        p0->in_vehicle = !p0->in_vehicle;
-                        p0->vehicle_cooldown = 30;
-                    } else if (!in_garage) {
-                        p0->in_vehicle = !p0->in_vehicle;
-                        p0->vehicle_cooldown = 30;
+                    } else if (use && local_state.players[0].vehicle_cooldown == 0) {
+                        if (in_garage && scene_near_vehicle_pad(local_state.scene_id, p0->x, p0->z, 6.0f, NULL)) {
+                            p0->in_vehicle = !p0->in_vehicle;
+                            p0->vehicle_cooldown = 30;
+                        } else if (!in_garage) {
+                            p0->in_vehicle = !p0->in_vehicle;
+                            p0->vehicle_cooldown = 30;
+                        }
                     }
                 }
                 if(local_state.players[0].vehicle_cooldown > 0) local_state.players[0].vehicle_cooldown--;

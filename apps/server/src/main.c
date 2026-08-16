@@ -580,10 +580,16 @@ void server_handle_packet(struct sockaddr_in *sender, char *buffer, int size) {
     if (head->type == PACKET_CONNECT) {
         // Verify the connect ticket BEFORE allocating any slot — an
         // invalid/missing/expired ticket (or an unconfigured secret, which
-        // fails closed) is silently dropped: no slot consumed, no Welcome
-        // sent. See EMILY/BACKLOG.md S156-02.
+        // fails closed) used to be silently dropped: no slot consumed, no
+        // Welcome sent, AND no log line, making a rejected ticket
+        // indistinguishable from a packet that never arrived at all (real
+        // gap found live 2026-08-10 chasing a "connects but can't move"
+        // report — this print is the fix for the blind spot, not a
+        // decoration). See EMILY/BACKLOG.md S156-02, S170-281.
         unsigned char player_id[16];
         if (!verify_connect_ticket(buffer, size, player_id)) {
+            printf("CONNECT rejected: invalid/missing/expired ticket from %s:%d\n",
+                   inet_ntoa(sender->sin_addr), ntohs(sender->sin_port));
             return;
         }
         // One seat per identity (VS2 hard constraint).
@@ -786,8 +792,17 @@ int main(int argc, char *argv[]) {
             if (p->active && p->state != STATE_DEAD) {
                 phys_set_scene(p->scene_id);
                 int use_pressed = p->in_use && !p->use_was_down;
+                // S169-08 (EMILY/BACKLOG.md): founder, "portals should work without a hotkey" /
+                // "jump in them and you go thru" -- portal traversal used to require use_pressed
+                // (the same edge-triggered USE-button check vehicle enter/exit still needs), so
+                // walking or jumping straight into a portal volume silently did nothing without a
+                // keypress. Portal entry is now automatic on proximity alone; portal_cooldown_
+                // until_ms is what still prevents an instant re-trigger loop (walking back through
+                // the exact same portal radius moments after arriving), not a keypress edge. Vehicle
+                // enter/exit below is a separate, deliberately still-keypress-gated interaction --
+                // this change only removes the gate from portals.
                 int portal_id = -1;
-                if (use_pressed && now >= p->portal_cooldown_until_ms &&
+                if (now >= p->portal_cooldown_until_ms &&
                     scene_portal_active(p->scene_id) && scene_portal_triggered(p, &portal_id)) {
                     int dest_scene = -1;
                     float sx = 0.0f, sy = 0.0f, sz = 0.0f;
