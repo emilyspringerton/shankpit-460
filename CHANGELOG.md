@@ -1,3 +1,6 @@
+## 2026-08-16
+- fix(portal): S169-08 -- portals now trigger on proximity alone, no hotkey needed. Founder: "portals should work without a hotkey" / "jump in them and you go thru." Both apps/server/src/main.c's authoritative check and apps/lobby/src/main.c's local-mode client prediction required the USE-button edge trigger ANDed onto scene_portal_triggered's own proximity check; removed on both sides, vehicle enter/exit (shares the same button) split into its own still-keypress-gated branch. Existing anti-retrigger guards (portal_cooldown_until_ms, transition_timer) unchanged. Both binaries build clean; real server+bot regression smoke test (emily-bot, 3 bots) PASS. Apple #13751, commit d48e57c. (sess-20260813-2154-dda37e8b)
+
 ## 2026-08-10
 - fix(ci): PLAY.bat now invokes ShankPit.exe directly + ends with pause, matching REDGARDEN's own proven PLAY.bat exactly, instead of 'start ShankPit.exe' (opens a detached window with zero error visibility and no pause -- if anything else ever goes wrong, e.g. a missing DLL or a crash, the player would see nothing at all, indistinguishable from 'stuck'). Same commit as the ticket-secret fix's own follow-up hardening. (sess-20260809-1420-e9d3d7f8)
 
