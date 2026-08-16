@@ -1077,6 +1077,127 @@ void draw_circle(float x, float y, float r, int segments) {
     glEnd();
 }
 
+/* S169-10: TAB-held scoreboard, backported from SHANKPIT (parent repo)
+ * apps/lobby/src/main.c's draw_tab_scoreboard. FFA path only, deliberately
+ * -- SHANKPIT's own version also has a team-mode (TDM/CTF) branch keyed
+ * off TDMB_BLUE_TEAM/TDMB_RED_TEAM and a per-team local_state.team_scores
+ * array, none of which exist in this fork: shankpit-460's own GameMode
+ * enum (packages/common/protocol.h) never gained the "B"/"O" bot-
+ * compatible team-mode variants SHANKPIT added after the 2026-03-31 fork
+ * point, and PlayerState.team_id is declared but never actually assigned
+ * anywhere in this codebase (confirmed by grep, not assumed) -- there is
+ * no real team assignment to score against yet. Porting the team-mode
+ * scoreboard UI on top of that would be building a real-looking display
+ * for data that doesn't exist. kills/deaths themselves ARE real and
+ * live-tracked (packages/simulation/local_game.h's apply_projectile_
+ * damage, owner->kills++/target->deaths++, confirmed working live via
+ * the emily-bot regression test's own per-bot kill/death columns) -- the
+ * FFA path below is grounded in real data. Team-mode scoreboard stays
+ * open, blocked on team assignment logic that's a separate, larger
+ * feature, not silently dropped. */
+typedef struct {
+    int id;
+    int kills;
+    int deaths;
+} ScoreRow;
+
+static int score_row_cmp_desc(const void *a, const void *b) {
+    const ScoreRow *ra = (const ScoreRow*)a;
+    const ScoreRow *rb = (const ScoreRow*)b;
+    if (ra->kills != rb->kills) return rb->kills - ra->kills;
+    if (ra->deaths != rb->deaths) return ra->deaths - rb->deaths;
+    return ra->id - rb->id;
+}
+
+static void draw_tab_scoreboard(PlayerState *self) {
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    if (!keys[SDL_SCANCODE_TAB]) return;
+
+    ScoreRow rows[MAX_CLIENTS];
+    int row_count = 0;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        PlayerState *p = &local_state.players[i];
+        if (!p->active) continue;
+        ScoreRow row = { i, p->kills, p->deaths };
+        rows[row_count++] = row;
+    }
+    qsort(rows, (size_t)row_count, sizeof(rows[0]), score_row_cmp_desc);
+
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, 1280, 0, 720);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+
+    const float panel_l = 220.0f;
+    const float panel_r = 1060.0f;
+    const float panel_b = 110.0f;
+    const float panel_t = 630.0f;
+    const float player_x = 300.0f;
+    const float kills_x = 860.0f;
+    const float deaths_x = 960.0f;
+    const float row_step = 34.0f;
+
+    glColor4f(0.05f, 0.07f, 0.10f, 0.84f);
+    glBegin(GL_QUADS);
+    glVertex2f(panel_l, panel_b); glVertex2f(panel_r, panel_b); glVertex2f(panel_r, panel_t); glVertex2f(panel_l, panel_t);
+    glEnd();
+
+    glColor4f(0.24f, 0.33f, 0.42f, 0.85f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(panel_l + 1.0f, panel_b + 1.0f); glVertex2f(panel_r - 1.0f, panel_b + 1.0f);
+    glVertex2f(panel_r - 1.0f, panel_t - 1.0f); glVertex2f(panel_l + 1.0f, panel_t - 1.0f);
+    glEnd();
+    glColor4f(0.02f, 0.04f, 0.07f, 0.85f);
+    glLineWidth(1.0f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(panel_l + 5.0f, panel_b + 5.0f); glVertex2f(panel_r - 5.0f, panel_b + 5.0f);
+    glVertex2f(panel_r - 5.0f, panel_t - 5.0f); glVertex2f(panel_l + 5.0f, panel_t - 5.0f);
+    glEnd();
+
+    glColor3f(0.95f, 0.95f, 0.2f);
+    draw_string("SCOREBOARD", 440, 590, 9);
+    glColor3f(0.72f, 0.90f, 1.0f);
+    draw_string("PLAYER", player_x, 552, 6);
+    draw_string("K", kills_x, 552, 6);
+    draw_string("D", deaths_x, 552, 6);
+
+    glColor4f(0.48f, 0.62f, 0.78f, 0.50f);
+    glBegin(GL_LINES);
+    glVertex2f(panel_l + 34.0f, 544.0f); glVertex2f(panel_r - 34.0f, 544.0f);
+    glEnd();
+
+    float row_start_y = 508.0f;
+    int visible_rows = (int)((row_start_y - (panel_b + 18.0f)) / row_step) + 1;
+    if (visible_rows < 0) visible_rows = 0;
+    if (visible_rows > row_count) visible_rows = row_count;
+    for (int i = 0; i < visible_rows; i++) {
+        PlayerState *row_p = &local_state.players[rows[i].id];
+        int is_self = (row_p == self);
+        float y = row_start_y - (float)i * row_step;
+        float row_top = y + 11.0f;
+        float row_bottom = y - 15.0f;
+        float stripe = (i % 2 == 0) ? 0.15f : 0.10f;
+        if (is_self) glColor4f(0.78f, 0.63f, 0.16f, 0.48f);
+        else glColor4f(0.12f, 0.16f, 0.22f, stripe);
+        glBegin(GL_QUADS);
+        glVertex2f(panel_l + 24.0f, row_bottom); glVertex2f(panel_r - 24.0f, row_bottom);
+        glVertex2f(panel_r - 24.0f, row_top); glVertex2f(panel_l + 24.0f, row_top);
+        glEnd();
+
+        glColor3f(is_self ? 1.0f : 0.82f, is_self ? 0.95f : 0.84f, is_self ? 0.35f : 0.92f);
+        char name_buf[64];
+        snprintf(name_buf, sizeof(name_buf), "%s%02d", is_self ? "YOU-" : "P", rows[i].id);
+        draw_string(name_buf, player_x, y, 6);
+        char score_buf[64];
+        snprintf(score_buf, sizeof(score_buf), "%d", rows[i].kills);
+        draw_string(score_buf, kills_x, y, 6);
+        snprintf(score_buf, sizeof(score_buf), "%d", rows[i].deaths);
+        draw_string(score_buf, deaths_x, y, 6);
+    }
+
+    glEnable(GL_DEPTH_TEST); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW); glPopMatrix();
+}
+
 void draw_hud(PlayerState *p) {
     glDisable(GL_DEPTH_TEST);
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, 1280, 0, 720);
@@ -1339,7 +1460,7 @@ void draw_scene(PlayerState *render_p) {
         if (p == render_p) continue;
         draw_player_3rd(p);
     }
-    draw_weapon_p(render_p); draw_hud(render_p); draw_garage_overlay(render_p);
+    draw_weapon_p(render_p); draw_hud(render_p); draw_garage_overlay(render_p); draw_tab_scoreboard(render_p);
     draw_travel_overlay();
 }
 
