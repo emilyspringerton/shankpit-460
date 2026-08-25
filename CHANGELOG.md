@@ -1,4 +1,5 @@
 ## 2026-08-25
+- added auto-release CI job (PITVIPER pattern), verified live with 2 real releases; fixed the same tests.yml/release.yml concurrency-group collision as SHANKPIT (sess-20260825-1938-f6bd411e)
 
 - fixed CI: Windows client build was missing packages/audio/{audio,audio_synth}.c link since 2026-08-16 (S169-09 spatial audio), every download since was stale (sess-20260825-1938-f6bd411e)
 
