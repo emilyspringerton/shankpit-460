@@ -1,3 +1,7 @@
+## 2026-08-25
+
+- fixed CI: Windows client build was missing packages/audio/{audio,audio_synth}.c link since 2026-08-16 (S169-09 spatial audio), every download since was stale (sess-20260825-1938-f6bd411e)
+
 ## 2026-08-16
 - feat(lobby): S169-02 -- 3-button front door (BOTS/ONLINE/EMPTY). Adapted the already-existing wrong-tree reference implementation (apps2/lobby/src/main.c, confirmed dead by S169-01) into the real tree's more evolved menu architecture (LobbyAction enum trimmed 6->3, flows through the existing generic list renderer/hit-tester/server-override/double-click-rename with zero changes to any of it) rather than copying verbatim. TDM/CTF/Evolution/direct-remote-join removed from the front door, matches the lean-esports-fork mission. ONLINE explicitly targets 127.0.0.1, not SERVER_HOST's okemily.com default. Verified visually: temporary throwaway build skipped the auto-connect-to-bot-pool boot hook to reach STATE_LOBBY for a screenshot (real source's hook confirmed untouched via grep after) -- three color-coded BOTS/ONLINE/EMPTY boxes render correctly. Real server+bot regression test PASS. Apple #13803, commit 009a5b4. (sess-20260813-2154-dda37e8b)
 
