@@ -9,7 +9,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: shankpit-${{ github.ref }}
+  # Same bug found and fixed in the parent SHANKPIT repo this same session: this and tests.yml
+  # shared the literal same group key, so every push raced the two workflows and whichever lost
+  # the concurrency lock got cancelled outright -- meaning this release.yml (the only workflow
+  # carrying the release job) could go a real stretch of pushes without ever completing. Scoped
+  # per-workflow-file so both run every push.
+  group: shankpit-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

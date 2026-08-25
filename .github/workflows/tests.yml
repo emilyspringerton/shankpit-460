@@ -9,7 +9,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: shankpit-${{ github.ref }}
+  # Scoped per-workflow-file (2026-08-25) -- was the literal same group key as release.yml's own;
+  # see that file's own concurrency block for the full story (same fix applied to parent SHANKPIT
+  # this same session).
+  group: shankpit-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
