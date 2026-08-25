@@ -72,6 +72,7 @@ jobs:
           test -f apps/lobby/src/main.c
 
           x86_64-w64-mingw32-gcc apps/lobby/src/main.c packages/render/proc_tex.c \
+            packages/audio/audio.c packages/audio/audio_synth.c \
             -o ShankPit.exe \
             -O2 -static-libgcc \
             -I./sdl2_mingw/include \
@@ -79,6 +80,7 @@ jobs:
             -Ipackages/common \
             -Ipackages/simulation \
             -Ipackages/render \
+            -Ipackages/audio \
             -L./sdl2_mingw/lib \
             -lmingw32 -lSDL2main -lSDL2 \
             -lopengl32 -lglu32 -lws2_32 -lwinmm -lgdi32 -lm
