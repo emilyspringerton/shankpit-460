@@ -1,16 +1,19 @@
 # SHANKPIT-460
 
 **This is `shankpit-460`** — forked from [`SHANKPIT`](https://github.com/emilyspringerton/SHANKPIT)
-## Current Status (2026-08-04)
+## Current Status (2026-08-26)
 
-Real bot-pool deathmatch is live: client boots directly into a match (no lobby yet), first-to-13-
-kills-or-5-minutes, 9-bot pool via the existing `shankpit460-emily-bot.service`. Real connectivity
-fixes shipped (missing connect-ticket, WELCOME-time deadlock, retry logic for both) and confirmed
-working over loopback — but **real remote players still can't connect**: server logs show zero
-non-`127.0.0.1` connections ever, strong evidence of a Linode Cloud Firewall block at the network
-edge (separate from the `ufw` rule already opened). Needs founder action in the Linode console
-(console.linode.com → instance → Firewalls → allow inbound UDP 6969) — not fixable from code. See
-`CHANGELOG.md` for the full trail.
+Real bot-pool deathmatch is live, first-to-13-kills-or-5-minutes, 9-bot pool via the existing
+`shankpit460-emily-bot.service`. The client now boots into a real 3-button lobby front door
+(BOTS/ONLINE/EMPTY, S169-02) instead of straight into a match. The earlier "remote players can't
+connect" symptom (server logs showing zero non-`127.0.0.1` connections) turned out **not** to be
+the suspected Linode Cloud Firewall block — real root cause found 2026-08-10: the CI-bundled
+Windows client's `PLAY.bat` never set `SHANKPIT_TICKET_SECRET`, so every downloaded client signed
+its connect ticket with an empty-string key and the server silently dropped it, indistinguishable
+from a network/firewall block from the outside. Fixed in both `tests.yml`/`release.yml`; live
+client connections verified clean since. Also backported from SHANKPIT: a TAB-held scoreboard
+(FFA path only, S169-10), spatial audio (S169-09), and proximity-only portals with no hotkey
+needed (S169-08). See `CHANGELOG.md` for the full trail.
 
 ---
 
