@@ -1,3 +1,10 @@
+## 2026-10-16
+- docs: shankpit-460 now has a browser build on WOTAN (<https://wotan.okemily.com/shankpit-460/>), a PARENA -> WebAssembly port of
+  this engine's online movement / weapon / projectile path (parity-tested against `physics.h`, `net_sim.h`, `local_game.h`: 40
+  scenarios, worst difference 5e-7) with its own bots and an IDUNA-hosted human lobby. Nothing in this repo's C changed; the port
+  deliberately differs in three places (walls stop bullets, delayed projectile deaths, safest-spawn respawns) -- see
+  `PARENA/stdlib/shankpit460/README.md`.
+
 ## 2026-08-25
 - added auto-release CI job (PITVIPER pattern), verified live with 2 real releases; fixed the same tests.yml/release.yml concurrency-group collision as SHANKPIT (sess-20260825-1938-f6bd411e)
 

@@ -15,6 +15,12 @@ client connections verified clean since. Also backported from SHANKPIT: a TAB-he
 (FFA path only, S169-10), spatial audio (S169-09), and proximity-only portals with no hotkey
 needed (S169-08). See `CHANGELOG.md` for the full trail.
 
+
+> **Play it in the browser.** shankpit-460 also runs as a WebAssembly build at <https://wotan.okemily.com/shankpit-460/> -- the
+> physics and weapons of this engine's online path ported to PARENA (`PARENA/stdlib/shankpit460/`, checked against this repo's
+> `physics.h` / `net_sim.h` / `local_game.h` tick for tick), with bots and human matchmaking (first to 16 kills or six
+> minutes) hosted by IDUNA. The C client and server here are unchanged.
+
 ---
 
 at tag `460` (2026-07-18). It diverges from the parent project from here forward with a distinct
